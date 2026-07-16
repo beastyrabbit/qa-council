@@ -5,7 +5,7 @@
   "main": "dist/server/index.js",
   "scripts": {
     "test": "vitest run",
-    "dev": "concurrently -k -n api,web \"tsx watch src/server/index.ts\" \"vite --host 0.0.0.0\"",
+    "dev": "concurrently -k -n api,web \"API_PORT=3001 tsx watch src/server/index.ts\" \"vite --host 0.0.0.0\"",
     "build": "tsc -p tsconfig.server.json && vite build",
     "start": "node dist/server/server/index.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",

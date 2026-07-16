@@ -265,6 +265,7 @@ function ResultView({ runId, onBack }: { runId: string; onBack: () => void }) {
         </div>
       )}
       {presentation && (
+        /* biome-ignore lint/security/noDangerouslySetInnerHtml: Der Server sanitisiert Modell-Markdown mit einer Tag- und Attribut-Allowlist. */
         <div className="rendered-result" dangerouslySetInnerHTML={{ __html: presentation.html }} />
       )}
     </div>
