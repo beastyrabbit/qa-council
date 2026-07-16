@@ -1,0 +1,7 @@
+.git
+.forgejo
+node_modules
+dist
+data
+.env
+Archiv (1).zip

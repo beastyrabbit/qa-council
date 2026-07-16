@@ -1,0 +1,25 @@
+services:
+  qa-council:
+    build: .
+    environment:
+      DATA_DIR: /data
+      TIKA_URL: http://tika:9998
+      AIBOX_URL: ${AIBOX_URL:-http://192.168.10.120:11434}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    ports:
+      - "3000:3000"
+    volumes:
+      - qa-council-data:/data
+    depends_on:
+      tika:
+        condition: service_healthy
+  tika:
+    image: apache/tika:3.3.1.0-full
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9998/version"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  qa-council-data:

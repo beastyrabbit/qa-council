@@ -1,0 +1,45 @@
+# QA Council
+
+QA Council prüft hochgeladene Dokumente mit einem nachvollziehbaren Multi-Rollen-Workflow auf Basis des Pi SDK. Die acht gelieferten QA-Quelldateien liegen unverändert unter `resources/qa/source` und werden vor jedem Lauf gegen fest eingebaute SHA-256-Werte geprüft.
+
+## Funktionsumfang
+
+- Upload von Text/Markdown sowie PDF-, Office-, OpenDocument-, RTF- und MSG-Dateien über Apache Tika
+- lückenlose Chunk-Verarbeitung mit Locator, Hash und Coverage-Manifest
+- Anbieterwahl zwischen serverseitigem Codex-OAuth, OpenRouter und lokaler Ollama-kompatibler AI Box
+- Council-Modi Auto, Quick, Standard und Deep
+- Triage/RACI, isolierte Rollenreviews, Cross-Reviews, Debatte und Synthese gemäß den kanonischen Quellen
+- persistentes Detailprotokoll ohne Speicherung versteckter Gedankengänge
+- finales Markdown als kanonisches Ergebnis; HTML/Text, QA-Zeitung und One-Paper als nachgelagerte Darstellungen
+- SQLite/Drizzle auf einem persistenten Volume; Modellartefakte bleiben virtuelle Datenbankobjekte
+
+## Lokal entwickeln
+
+Voraussetzungen sind Node.js 24+, pnpm und Portless. Die API läuft intern auf Port 3001, Vite wird von Portless unter einer stabilen URL bereitgestellt.
+
+```bash
+pnpm install
+portless
+```
+
+Anschließend ist die Oberfläche unter `http://qa-council.localhost:1355` erreichbar, wenn Portless auf den unprivilegierten Standardport zurückfällt. Für binäre Dokumente muss zusätzlich Tika erreichbar sein, beispielsweise mit `docker compose up tika`.
+
+## Konfiguration
+
+- Codex: in der Einstellungsseite anmelden; das Pi-Auth-File liegt unter `/data/pi/auth.json`. Als manueller Fallback kann im Container `pi /login` verwendet werden.
+- OpenRouter: API-Key in der Einstellungsseite oder über `OPENROUTER_API_KEY`.
+- AI Box: Standardadresse `http://192.168.10.120:11434`; Modellliste über `/api/tags`, Inferenz über `/v1`.
+- `TIKA_URL`: Standard `http://127.0.0.1:9998`.
+- `DATA_DIR`: Standard `./data`, im Container `/data`.
+
+## Qualitätsprüfung
+
+```bash
+pnpm check
+```
+
+Dies führt Biome, TypeScript, Vitest und den Produktionsbuild aus. Der Pre-Commit-Hook ergänzt Gitleaks.
+
+## Deployment
+
+Das Container-Image wird von Forgejo Actions über den gemeinsamen BuildKit- und Registry-Login-Workflow als `git.heerlab.com/beasty/qa-council` veröffentlicht. Die GitOps-Manifeste liegen im separaten `kub-homelab`-Repository unter `cluster/homelab/apps/tools/qa-council`.
