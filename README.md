@@ -13,6 +13,10 @@ QA Council prüft hochgeladene Dokumente mit einem nachvollziehbaren Multi-Rolle
 - finales Markdown als kanonisches Ergebnis; HTML/Text, QA-Zeitung und One-Paper als nachgelagerte Darstellungen
 - SQLite/Drizzle auf einem persistenten Volume; Modellartefakte bleiben virtuelle Datenbankobjekte
 
+## Dokumentation
+
+Die vollständige Projektdokumentation beginnt unter [docs/README.md](docs/README.md). Sie beschreibt Architektur, Council-Regeln, Provider, Betrieb, Sicherheit und das Homelab-Deployment.
+
 ## Lokal entwickeln
 
 Voraussetzungen sind Node.js 24+, pnpm und Portless. Die API läuft intern auf Port 3001, Vite wird von Portless unter einer stabilen URL bereitgestellt.
