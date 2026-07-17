@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { createPresentation, reportDesignerPrompt } from "./presentation.js";
+import { createPresentation, markdownHtml, reportDesignerPrompt } from "./presentation.js";
+
+describe("Markdown-Ausgabe", () => {
+  it("formatiert Modelltext und entfernt aktive oder unsichere Inhalte", () => {
+    const html = markdownHtml(
+      '# Titel\n\n- **Punkt**\n\n<script>alert(1)</script><a href="javascript:alert(1)" onclick="alert(1)">unsicher</a><a href="//evil.test">relativ</a>',
+    );
+    expect(html).toContain("<h1>Titel</h1>");
+    expect(html).toContain("<strong>Punkt</strong>");
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("javascript:");
+    expect(html).not.toContain("onclick");
+    expect(html).not.toContain("//evil.test");
+  });
+});
 
 const finalMarkdown = `# Ergebnis
 

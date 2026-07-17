@@ -29,17 +29,34 @@ import { encryptSecret } from "./crypto.js";
 import { sqlite } from "./db/index.js";
 import { extractDocument } from "./extract.js";
 import {
+  cancelRun,
   enqueueRun,
   generateAdditionalPresentation,
+  isRunExecuting,
   recoverInterruptedRuns,
   resumeRunWithAnswer,
 } from "./orchestrator.js";
 import { createPresentationPdf } from "./pdf.js";
+import { markdownHtml } from "./presentation.js";
 import { authStorage, codexAuthStatus, listModels } from "./providers.js";
 import { sha256 } from "./skills.js";
 
 const app = Fastify({ logger: true, bodyLimit: 52_428_800 });
 await app.register(multipart, { limits: { fileSize: 52_428_800, files: 1 } });
+
+const markdownCache = new Map<string, string>();
+function cachedMarkdownHtml(markdown: string) {
+  const key = sha256(markdown);
+  const existing = markdownCache.get(key);
+  if (existing !== undefined) return existing;
+  const html = markdownHtml(markdown);
+  markdownCache.set(key, html);
+  if (markdownCache.size > 250) {
+    const oldest = markdownCache.keys().next().value;
+    if (oldest) markdownCache.delete(oldest);
+  }
+  return html;
+}
 
 function documentDto(row: Record<string, unknown>): DocumentRecord {
   return {
@@ -429,7 +446,7 @@ app.get("/api/runs/:id", async (request, reply) => {
     .prepare("SELECT * FROM artifacts WHERE run_id = ? ORDER BY created_at")
     .all(id) as Array<Record<string, unknown>>;
   const stageRows = sqlite
-    .prepare("SELECT * FROM run_stages WHERE run_id = ? ORDER BY started_at, id")
+    .prepare("SELECT * FROM run_stages WHERE run_id = ? ORDER BY started_at, rowid")
     .all(id) as Array<Record<string, unknown>>;
   const presentationRows = sqlite
     .prepare("SELECT * FROM presentations WHERE run_id = ? ORDER BY created_at")
@@ -443,6 +460,7 @@ app.get("/api/runs/:id", async (request, reply) => {
     run: runDto(runRow),
     stages: stageRows.map((row) => {
       const matchingArtifact = artifactRows.find((artifact) => artifact.stage_id === row.id);
+      const outputText = String(row.output_text || matchingArtifact?.content || "");
       return {
         id: String(row.id),
         runId: String(row.run_id),
@@ -450,7 +468,8 @@ app.get("/api/runs/:id", async (request, reply) => {
         role: row.role as string | null,
         status: row.status as RunStageRecord["status"],
         thinkingText: String(row.thinking_text ?? ""),
-        outputText: String(row.output_text || matchingArtifact?.content || ""),
+        outputText,
+        outputHtml: outputText ? cachedMarkdownHtml(outputText) : "",
         inputTokens: Number(row.input_tokens),
         outputTokens: Number(row.output_tokens),
         costMicros: Number(row.cost_micros),
@@ -508,7 +527,8 @@ app.put("/api/runs/archive-all", async () => {
   const result = sqlite
     .prepare(
       `UPDATE runs SET archived_at = ?
-       WHERE comparison_id IS NULL AND archived_at IS NULL AND status IN ('completed', 'failed')`,
+       WHERE comparison_id IS NULL AND archived_at IS NULL
+         AND status IN ('completed', 'failed', 'cancelled')`,
     )
     .run(archivedAt);
   return { archived: result.changes, archivedAt };
@@ -522,10 +542,13 @@ app.put("/api/runs/:id/archive", async (request, reply) => {
     | { status: string }
     | undefined;
   if (!run) return reply.code(404).send({ error: "Lauf nicht gefunden." });
-  if (!["completed", "failed"].includes(run.status)) {
+  if (isRunExecuting(id)) {
     return reply
       .code(409)
-      .send({ error: "Nur abgeschlossene oder fehlgeschlagene Läufe können archiviert werden." });
+      .send({ error: "Der Lauf wird noch beendet. Bitte versuche das Archivieren gleich erneut." });
+  }
+  if (!["completed", "failed", "cancelled"].includes(run.status)) {
+    return reply.code(409).send({ error: "Nur beendete Läufe können archiviert werden." });
   }
   sqlite
     .prepare("UPDATE runs SET archived_at = ? WHERE id = ?")
@@ -539,11 +562,30 @@ app.delete("/api/runs/:id", async (request, reply) => {
     | { status: string }
     | undefined;
   if (!run) return reply.code(404).send({ error: "Lauf nicht gefunden." });
-  if (run.status !== "failed") {
-    return reply.code(409).send({ error: "Nur fehlgeschlagene Läufe dürfen gelöscht werden." });
+  if (isRunExecuting(id)) {
+    return reply
+      .code(409)
+      .send({ error: "Der Lauf wird noch beendet. Bitte versuche das Löschen gleich erneut." });
+  }
+  if (!["failed", "cancelled"].includes(run.status)) {
+    return reply
+      .code(409)
+      .send({ error: "Nur fehlgeschlagene oder abgebrochene Läufe dürfen gelöscht werden." });
   }
   sqlite.prepare("DELETE FROM runs WHERE id = ?").run(id);
   return reply.code(204).send();
+});
+
+app.post("/api/runs/:id/cancel", async (request, reply) => {
+  const { id } = request.params as { id: string };
+  const result = cancelRun(id);
+  if (result === "not_found") {
+    return reply.code(404).send({ error: "Lauf nicht gefunden." });
+  }
+  if (result === "not_active") {
+    return reply.code(409).send({ error: "Dieser Lauf ist nicht mehr aktiv." });
+  }
+  return reply.code(202).send({ ok: true });
 });
 
 app.post("/api/runs/:id/answer", async (request, reply) => {

@@ -58,6 +58,7 @@ function storeImage(options: {
 async function generateOpenAiImage(options: {
   runId: string;
   prompt: string;
+  signal?: AbortSignal;
   onEvent?: (event: ImageEvent) => void;
 }) {
   const row = providerRow("codex");
@@ -85,7 +86,9 @@ async function generateOpenAiImage(options: {
       quality: "medium",
       output_format: "png",
     }),
-    signal: AbortSignal.timeout(180_000),
+    signal: options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(180_000)])
+      : AbortSignal.timeout(180_000),
   });
   const body = (await response.json()) as {
     data?: Array<{ b64_json?: string }>;
@@ -114,6 +117,7 @@ async function generateOpenRouterImage(options: {
   runId: string;
   model: string;
   prompt: string;
+  signal?: AbortSignal;
   onEvent?: (event: ImageEvent) => void;
 }) {
   const row = providerRow("openrouter");
@@ -131,7 +135,12 @@ async function generateOpenRouterImage(options: {
   const result = await imagesModels.generateImages(
     model,
     { input: [{ type: "text", text: options.prompt }] },
-    { apiKey, signal: AbortSignal.timeout(180_000) },
+    {
+      apiKey,
+      signal: options.signal
+        ? AbortSignal.any([options.signal, AbortSignal.timeout(180_000)])
+        : AbortSignal.timeout(180_000),
+    },
   );
   const image = result.output.find((item) => item.type === "image");
   if (result.stopReason === "error" || !image || image.type !== "image") {
@@ -161,6 +170,7 @@ export async function getOrCreateRunImage(options: {
   imageProvider: ImageProvider;
   documentName: string;
   summary: string;
+  signal?: AbortSignal;
   onEvent?: (event: ImageEvent) => void;
 }) {
   const existing = sqlite
@@ -179,7 +189,12 @@ export async function getOrCreateRunImage(options: {
 
   const prompt = editorialImagePrompt(options.documentName, options.summary);
   if (options.imageProvider === "openai") {
-    return generateOpenAiImage({ runId: options.runId, prompt, onEvent: options.onEvent });
+    return generateOpenAiImage({
+      runId: options.runId,
+      prompt,
+      signal: options.signal,
+      onEvent: options.onEvent,
+    });
   }
   if (options.imageProvider === "openrouter") {
     try {
@@ -187,6 +202,7 @@ export async function getOrCreateRunImage(options: {
         runId: options.runId,
         model: options.model,
         prompt,
+        signal: options.signal,
         onEvent: options.onEvent,
       });
       if (nativeImage) return nativeImage;
@@ -197,6 +213,7 @@ export async function getOrCreateRunImage(options: {
         data: { provider: "openrouter", model: options.model, fallback: "comfyui" },
       });
     } catch (error) {
+      if (options.signal?.aborted) throw error;
       options.onEvent?.({
         type: "image_generation_fallback",
         level: "warning",
@@ -211,6 +228,7 @@ export async function getOrCreateRunImage(options: {
     runId: options.runId,
     documentName: options.documentName,
     summary: options.summary,
+    signal: options.signal,
     onEvent: options.onEvent,
   });
 }

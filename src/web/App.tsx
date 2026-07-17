@@ -1,3 +1,4 @@
+/* biome-ignore-all lint/security/noDangerouslySetInnerHtml: Beide HTML-Ausgaben werden serverseitig per expliziter Tag-, Attribut- und URL-Allowlist sanitisiert. */
 import {
   Archive,
   ArrowLeft,
@@ -17,12 +18,21 @@ import {
   Search,
   Settings,
   Sheet,
+  Square,
   Terminal,
   Trash2,
   Upload,
   Users,
 } from "lucide-react";
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type DragEvent,
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   AppSettings,
   ComparisonRecord,
@@ -45,6 +55,42 @@ async function api<T>(url: string, options?: RequestInit): Promise<T> {
     throw new Error(typeof body.error === "string" ? body.error : JSON.stringify(body.error));
   }
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
+}
+
+function useFileDrop(onFile: (file?: File) => void, disabled = false) {
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
+
+  function preventBrowserOpen(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  return {
+    dragging,
+    onDragEnter(event: DragEvent<HTMLLabelElement>) {
+      preventBrowserOpen(event);
+      if (disabled) return;
+      dragDepth.current += 1;
+      setDragging(true);
+    },
+    onDragOver(event: DragEvent<HTMLLabelElement>) {
+      preventBrowserOpen(event);
+      if (!disabled) event.dataTransfer.dropEffect = "copy";
+    },
+    onDragLeave(event: DragEvent<HTMLLabelElement>) {
+      preventBrowserOpen(event);
+      if (disabled) return;
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (dragDepth.current === 0) setDragging(false);
+    },
+    onDrop(event: DragEvent<HTMLLabelElement>) {
+      preventBrowserOpen(event);
+      dragDepth.current = 0;
+      setDragging(false);
+      if (!disabled) onFile(event.dataTransfer.files.item(0) ?? undefined);
+    },
+  };
 }
 
 const PROVIDER_NAMES: Record<ProviderId, string> = {
@@ -98,9 +144,22 @@ function routeFromPath(pathname = window.location.pathname) {
 function Status({ run }: { run: RunRecord }) {
   if (run.status === "completed") return <span className="status status--done">Fertig</span>;
   if (run.status === "failed") return <span className="status status--error">Fehler</span>;
+  if (run.status === "cancelling")
+    return <span className="status status--cancelled">Wird abgebrochen …</span>;
+  if (run.status === "cancelled")
+    return <span className="status status--cancelled">Abgebrochen</span>;
   if (run.status === "waiting_for_input")
     return <span className="status status--wait">Rückfrage</span>;
   return <span className="status">{run.status === "queued" ? "Wartet" : `${run.progress} %`}</span>;
+}
+
+function SanitizedMarkdown({ html }: { html: string }) {
+  return (
+    <div
+      className="model-output model-output--markdown"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
 }
 
 const SYSTEM_EVENTS = new Set([
@@ -126,6 +185,9 @@ const SYSTEM_EVENTS = new Set([
   "image_generation_fallback",
   "run_completed",
   "run_failed",
+  "run_cancelled",
+  "run_cancel_requested",
+  "parallel_stage_group_started",
 ]);
 
 function RunView({
@@ -145,6 +207,7 @@ function RunView({
   const [error, setError] = useState("");
   const [answer, setAnswer] = useState("");
   const [liveFollow, setLiveFollow] = useState(true);
+  const [cancelling, setCancelling] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const load = useCallback(() => {
     void api<RunDetails>(`/api/runs/${id}`)
@@ -159,7 +222,12 @@ function RunView({
   }, [load]);
 
   useEffect(() => {
-    if (!liveFollow || !details || details.run.status === "completed") return;
+    if (
+      !liveFollow ||
+      !details ||
+      ["completed", "failed", "cancelled"].includes(details.run.status)
+    )
+      return;
     const frame = window.requestAnimationFrame(() => {
       if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
     });
@@ -189,9 +257,31 @@ function RunView({
     onChanged();
   }
 
-  async function removeFailedRun() {
-    if (details?.run.status !== "failed") return;
-    if (!window.confirm("Diesen fehlgeschlagenen Lauf dauerhaft löschen?")) return;
+  async function cancelActiveRun() {
+    if (!activeRun) return;
+    if (
+      !window.confirm(
+        "Diesen Lauf jetzt abbrechen? Bereits erzeugte Log-Ausgaben bleiben erhalten.",
+      )
+    )
+      return;
+    setCancelling(true);
+    setError("");
+    try {
+      await api(`/api/runs/${id}/cancel`, { method: "POST" });
+      load();
+      onChanged();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function removeStoppedRun() {
+    if (!details || !["failed", "cancelled"].includes(details.run.status)) return;
+    const label = details.run.status === "failed" ? "fehlgeschlagenen" : "abgebrochenen";
+    if (!window.confirm(`Diesen ${label} Lauf dauerhaft löschen?`)) return;
     await api(`/api/runs/${id}`, { method: "DELETE" });
     onChanged();
     onBack();
@@ -224,14 +314,25 @@ function RunView({
           <strong>{details?.run.documentName ?? "Lauf wird geladen …"}</strong>
         </div>
         <div className="run-toolbar__actions">
-          {details && ["completed", "failed"].includes(details.run.status) && (
+          {activeRun && (
+            <button
+              className="button button--danger"
+              type="button"
+              disabled={cancelling}
+              onClick={() => void cancelActiveRun()}
+            >
+              <Square size={15} fill="currentColor" />
+              {cancelling ? "Wird abgebrochen …" : "Lauf abbrechen"}
+            </button>
+          )}
+          {details && ["completed", "failed", "cancelled"].includes(details.run.status) && (
             <button className="button button--quiet" type="button" onClick={toggleArchive}>
               <Archive size={16} />
               {details.run.archivedAt ? "Wiederherstellen" : "Archivieren"}
             </button>
           )}
-          {details?.run.status === "failed" && (
-            <button className="button button--danger" type="button" onClick={removeFailedRun}>
+          {details && ["failed", "cancelled"].includes(details.run.status) && (
+            <button className="button button--danger" type="button" onClick={removeStoppedRun}>
               <Trash2 size={16} /> Löschen
             </button>
           )}
@@ -295,7 +396,9 @@ function RunView({
                             ? "Antwort vollständig"
                             : status === "failed"
                               ? "fehlgeschlagen"
-                              : "wartet"}
+                              : status === "cancelled"
+                                ? "abgebrochen"
+                                : "wartet"}
                       </small>
                     </div>
                   </div>
@@ -381,13 +484,16 @@ function RunView({
                         <pre>{stage.thinkingText}</pre>
                       </details>
                     )}
-                    <pre className="model-output">
-                      {stage.outputText ||
-                        (stage.status === "running"
+                    {stage.outputHtml ? (
+                      <SanitizedMarkdown html={stage.outputHtml} />
+                    ) : (
+                      <div className="model-output">
+                        {stage.status === "running"
                           ? "Modell verarbeitet Dokument und Council-Kontext …"
-                          : "Keine Textausgabe gespeichert.")}
-                      {stage.status === "running" && <span className="stream-cursor">▋</span>}
-                    </pre>
+                          : "Keine Textausgabe gespeichert."}
+                      </div>
+                    )}
+                    {stage.status === "running" && <span className="stream-cursor">▋</span>}
                   </article>
                 ))}
               </div>
@@ -632,7 +738,6 @@ function ResultView({
         </div>
       )}
       {renderedHtml && (
-        /* biome-ignore lint/security/noDangerouslySetInnerHtml: Der Server sanitisiert Modell-Markdown mit einer Tag- und Attribut-Allowlist. */
         <div className="rendered-result" dangerouslySetInnerHTML={{ __html: renderedHtml }} />
       )}
     </div>
@@ -812,6 +917,7 @@ function TestModeView({
       setUploading(false);
     }
   }
+  const testFileDrop = useFileDrop((file) => void uploadTestFile(file), uploading);
 
   async function startComparison() {
     if (!document) return;
@@ -864,12 +970,23 @@ function TestModeView({
       </header>
       {message && <p className="notice notice--error">{message}</p>}
       <section className="test-composer">
-        <label className={`upload-zone ${uploading ? "upload-zone--busy" : ""}`}>
+        <label
+          className={`upload-zone ${uploading ? "upload-zone--busy" : ""} ${
+            testFileDrop.dragging ? "upload-zone--dragging" : ""
+          }`}
+          onDragEnter={testFileDrop.onDragEnter}
+          onDragOver={testFileDrop.onDragOver}
+          onDragLeave={testFileDrop.onDragLeave}
+          onDrop={testFileDrop.onDrop}
+        >
           <input
             type="file"
             accept=".md,.txt,.pdf,.docx,.html,.htm"
             disabled={uploading}
-            onChange={(event) => void uploadTestFile(event.target.files?.[0])}
+            onChange={(event) => {
+              void uploadTestFile(event.target.files?.[0]);
+              event.currentTarget.value = "";
+            }}
           />
           {uploading ? <LoaderCircle className="spin" size={25} /> : <Upload size={25} />}
           <span>
@@ -877,7 +994,7 @@ function TestModeView({
             <small>
               {document
                 ? `${formatSize(document.size)} · bereit für den Vergleich`
-                : "Markdown, Text, PDF, DOCX oder HTML · maximal 50 MB"}
+                : "Auswählen oder hier ablegen · Markdown, Text, PDF, DOCX oder HTML · maximal 50 MB"}
             </small>
           </span>
           <span className="button button--quiet">
@@ -935,10 +1052,10 @@ function TestModeView({
           <label>
             <span>Council-Modus</span>
             <select value={mode} onChange={(event) => setMode(event.target.value as CouncilMode)}>
-              <option value="standard">Standard</option>
-              <option value="quick">Quick</option>
-              <option value="deep">Deep</option>
-              <option value="auto">Automatisch</option>
+              <option value="standard">Standard · 2 Council-Runden</option>
+              <option value="quick">Quick · 1 Council-Runde</option>
+              <option value="deep">Deep · 3 Council-Runden</option>
+              <option value="auto">Automatisch · Architekten-Empfehlung</option>
             </select>
           </label>
           <label>
@@ -1592,6 +1709,7 @@ export function App() {
       setUploading(false);
     }
   }
+  const reviewFileDrop = useFileDrop((file) => void uploadFile(file), uploading);
 
   async function startRun() {
     if (!selected || !model) return;
@@ -1660,10 +1778,10 @@ export function App() {
     await load();
   }
 
-  async function deleteFailedRun(run: RunRecord) {
-    if (run.status !== "failed") return;
-    if (!window.confirm(`Fehlgeschlagenen Lauf für „${run.documentName}“ dauerhaft löschen?`))
-      return;
+  async function deleteStoppedRun(run: RunRecord) {
+    if (!["failed", "cancelled"].includes(run.status)) return;
+    const label = run.status === "failed" ? "Fehlgeschlagenen" : "Abgebrochenen";
+    if (!window.confirm(`${label} Lauf für „${run.documentName}“ dauerhaft löschen?`)) return;
     await api(`/api/runs/${run.id}`, { method: "DELETE" });
     await load();
   }
@@ -1880,17 +1998,29 @@ export function App() {
                 gewählte Darstellung.
               </p>
             </header>
-            <label className={`upload-zone ${uploading ? "upload-zone--busy" : ""}`}>
+            <label
+              className={`upload-zone ${uploading ? "upload-zone--busy" : ""} ${
+                reviewFileDrop.dragging ? "upload-zone--dragging" : ""
+              }`}
+              onDragEnter={reviewFileDrop.onDragEnter}
+              onDragOver={reviewFileDrop.onDragOver}
+              onDragLeave={reviewFileDrop.onDragLeave}
+              onDrop={reviewFileDrop.onDrop}
+            >
               <input
                 type="file"
-                onChange={(event) => void uploadFile(event.target.files?.[0])}
+                onChange={(event) => {
+                  void uploadFile(event.target.files?.[0]);
+                  event.currentTarget.value = "";
+                }}
                 disabled={uploading}
               />
               {uploading ? <LoaderCircle className="spin" size={25} /> : <Upload size={25} />}
               <span>
                 <strong>{uploading ? "Datei wird gelesen …" : "Datei hochladen"}</strong>
                 <small>
-                  Text, Markdown, PDF, Office, OpenDocument, RTF oder MSG · maximal 50 MB
+                  Auswählen oder hier ablegen · Text, Markdown, PDF, Office, OpenDocument, RTF oder
+                  MSG · maximal 50 MB
                 </small>
               </span>
               <span className="button button--quiet">Auswählen</span>
@@ -1946,12 +2076,15 @@ export function App() {
                     value={mode}
                     onChange={(event) => setMode(event.target.value as CouncilMode)}
                   >
-                    <option value="auto">Automatisch</option>
-                    <option value="quick">Quick</option>
-                    <option value="standard">Standard</option>
-                    <option value="deep">Deep</option>
+                    <option value="auto">Automatisch · Architekten-Empfehlung</option>
+                    <option value="quick">Quick · 1 Council-Runde</option>
+                    <option value="standard">Standard · 2 Council-Runden</option>
+                    <option value="deep">Deep · 3 Council-Runden</option>
                   </select>
-                  <small>Auto wählt nach Risiko und Umfang.</small>
+                  <small>
+                    Der QA-Architekt wählt die RACI-Mitglieder; der Modus steuert nur die
+                    Abschlussrunden.
+                  </small>
                 </label>
                 <label>
                   <span>Erste Darstellung</span>
@@ -2045,7 +2178,8 @@ export function App() {
                 type="button"
                 disabled={
                   !runs.some(
-                    (run) => !run.archivedAt && ["completed", "failed"].includes(run.status),
+                    (run) =>
+                      !run.archivedAt && ["completed", "failed", "cancelled"].includes(run.status),
                   )
                 }
                 onClick={() => void archiveAllRuns()}
@@ -2096,7 +2230,7 @@ export function App() {
                           Resultat
                         </button>
                       )}
-                      {["completed", "failed"].includes(run.status) && (
+                      {["completed", "failed", "cancelled"].includes(run.status) && (
                         <button
                           className="icon-button"
                           type="button"
@@ -2107,13 +2241,13 @@ export function App() {
                           <Archive size={16} />
                         </button>
                       )}
-                      {run.status === "failed" && (
+                      {["failed", "cancelled"].includes(run.status) && (
                         <button
                           className="icon-button icon-button--danger"
                           type="button"
-                          aria-label="Fehlgeschlagenen Lauf löschen"
+                          aria-label="Beendeten Lauf löschen"
                           title="Löschen"
-                          onClick={() => void deleteFailedRun(run)}
+                          onClick={() => void deleteStoppedRun(run)}
                         >
                           <Trash2 size={16} />
                         </button>
@@ -2163,12 +2297,12 @@ export function App() {
                     >
                       Wiederherstellen
                     </button>
-                    {run.status === "failed" && (
+                    {["failed", "cancelled"].includes(run.status) && (
                       <button
                         className="icon-button icon-button--danger"
                         type="button"
-                        aria-label="Fehlgeschlagenen Lauf löschen"
-                        onClick={() => void deleteFailedRun(run)}
+                        aria-label="Beendeten Lauf löschen"
+                        onClick={() => void deleteStoppedRun(run)}
                       >
                         <Trash2 size={16} />
                       </button>

@@ -1,7 +1,14 @@
 export type ProviderId = "codex" | "openrouter" | "aibox";
 export type CouncilMode = "auto" | "quick" | "standard" | "deep";
 export type PresentationKind = "text" | "newspaper" | "onepaper";
-export type RunStatus = "queued" | "running" | "waiting_for_input" | "completed" | "failed";
+export type RunStatus =
+  | "queued"
+  | "running"
+  | "cancelling"
+  | "waiting_for_input"
+  | "completed"
+  | "failed"
+  | "cancelled";
 export type ImageProvider = "comfyui" | "openai" | "openrouter";
 export type OpenRouterRoutingMode = "balanced" | "lowest" | "fastest";
 
@@ -70,9 +77,10 @@ export interface RunStageRecord {
   runId: string;
   name: string;
   role?: string | null;
-  status: "running" | "completed" | "failed";
+  status: "running" | "completed" | "failed" | "cancelled";
   thinkingText: string;
   outputText: string;
+  outputHtml: string;
   inputTokens: number;
   outputTokens: number;
   costMicros: number;

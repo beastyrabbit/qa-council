@@ -59,6 +59,8 @@ export function markdownHtml(markdown: string): string {
   return sanitizeHtml(marked.parse(markdown, { async: false }) as string, {
     allowedTags,
     allowedAttributes: { a: ["href", "title"], code: ["class"], "*": ["id"] },
+    allowedSchemes: ["http", "https", "mailto"],
+    allowProtocolRelative: false,
   });
 }
 
@@ -255,6 +257,7 @@ export async function createPresentation(options: {
   runId?: string;
   imageProvider?: ImageProvider | null;
   editorialImageId?: string | null;
+  signal?: AbortSignal;
   onEvent?: (event: {
     type: string;
     message: string;
@@ -299,9 +302,11 @@ export async function createPresentation(options: {
         imageProvider: options.imageProvider,
         documentName: options.documentName,
         summary: parsedPackage.imageBrief || generatedSource,
+        signal: options.signal,
         onEvent: options.onEvent,
       });
     } catch (error) {
+      if (options.signal?.aborted) throw error;
       imageId = null;
       options.onEvent?.({
         type: "image_generation_failed",

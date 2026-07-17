@@ -92,6 +92,7 @@ export async function createPresentationScreenshot(
   html: string,
   title: string,
   viewport: { width: number; height: number },
+  signal?: AbortSignal,
 ) {
   const { directory, inputPath } = await temporaryDocument(html, title, "qa-council-shot-");
   const outputPath = path.join(directory, "presentation.png");
@@ -109,7 +110,12 @@ export async function createPresentationScreenshot(
         `--screenshot=${outputPath}`,
         pathToFileURL(inputPath).href,
       ],
-      { env: { ...process.env, HOME: directory }, maxBuffer: 10 * 1024 * 1024 },
+      {
+        env: { ...process.env, HOME: directory },
+        maxBuffer: 10 * 1024 * 1024,
+        signal,
+        timeout: 60_000,
+      },
     );
     return await fs.readFile(outputPath);
   } finally {

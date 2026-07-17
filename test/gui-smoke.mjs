@@ -6,6 +6,7 @@ import path from "node:path";
 const baseUrl = process.env.GUI_BASE_URL ?? "https://qa-council.localhost:1355";
 const documentId = process.env.GUI_DOCUMENT_ID;
 const runId = process.env.GUI_RUN_ID;
+const cancelRunId = process.env.GUI_CANCEL_RUN_ID;
 const newspaperId = process.env.GUI_NEWSPAPER_ID;
 const onepaperId = process.env.GUI_ONEPAPER_ID;
 const comparisonId = process.env.GUI_COMPARISON_ID;
@@ -122,6 +123,7 @@ async function screenshot(filename) {
 
 const checks = [];
 let archivedForTest = [];
+let droppedDocumentId;
 try {
   await Promise.all([send("Page.enable"), send("Runtime.enable"), send("Log.enable")]);
   let page = await navigate("/");
@@ -130,6 +132,54 @@ try {
   }
   assert(page.text.includes("Prüfung konfigurieren"), "Prüfkonfiguration fehlt.");
   checks.push("review");
+
+  const droppedFileName = `drag-drop-smoke-${Date.now()}.md`;
+  await evaluate(`(() => {
+    const zone = document.querySelector(".review-page .upload-zone");
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(
+      ["# Drag-and-drop smoke\\n\\n" + ${JSON.stringify(droppedFileName)}],
+      ${JSON.stringify(droppedFileName)},
+      {type: "text/markdown"}
+    ));
+    zone.dispatchEvent(new DragEvent("dragenter", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: transfer
+    }));
+    window.__qaDropTransfer = transfer;
+    return true;
+  })()`);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const dragState = await evaluate(
+    `document.querySelector(".review-page .upload-zone").classList.contains("upload-zone--dragging")`,
+  );
+  await evaluate(`(() => {
+    const zone = document.querySelector(".review-page .upload-zone");
+    zone.dispatchEvent(new DragEvent("drop", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: window.__qaDropTransfer
+    }));
+    delete window.__qaDropTransfer;
+    return true;
+  })()`);
+  assert(dragState, "Die Upload-Fläche zeigt beim Ziehen keinen aktiven Zustand.");
+  await waitFor(
+    `document.querySelector(".selected-document")?.textContent.includes(${JSON.stringify(
+      droppedFileName,
+    )})`,
+    "Die abgelegte Markdown-Datei wurde nicht hochgeladen und ausgewählt.",
+  );
+  droppedDocumentId = await evaluate(
+    `fetch("/api/documents").then((response) => response.json()).then(
+      (documents) => documents.find((document) => document.name === ${JSON.stringify(
+        droppedFileName,
+      )})?.id
+    )`,
+  );
+  assert(Boolean(droppedDocumentId), "Das abgelegte Testdokument fehlt in der API.");
+  checks.push("document-drag-and-drop");
 
   page = await navigate("/tests");
   await waitFor(
@@ -208,7 +258,9 @@ try {
   if (process.env.GUI_TEST_ARCHIVE_ALL === "1") {
     archivedForTest = await evaluate(`fetch("/api/runs").then((response) => response.json()).then(
       (runs) => runs
-        .filter((run) => !run.archivedAt && ["completed", "failed"].includes(run.status))
+        .filter((run) =>
+          !run.archivedAt && ["completed", "failed", "cancelled"].includes(run.status)
+        )
         .map((run) => run.id)
     )`);
     await evaluate(`[...document.querySelectorAll("button")]
@@ -245,15 +297,29 @@ try {
   if (runId) {
     page = await navigate(`/runs/${runId}`);
     await waitFor("Boolean(document.querySelector('.run-layout'))", "Worklog wurde nicht geladen.");
-    assert(
-      page.text.includes("Report-Design · Zeitung und One-Pager"),
-      "Report-Design-Stage fehlt im Worklog.",
-    );
+    assert(page.text.includes("Report-Design ·"), "Report-Design-Stage fehlt im Worklog.");
     assert(
       await evaluate("document.body.textContent.includes('<report-package>')"),
       "Vollständige HTML-Modellausgabe fehlt im Worklog.",
     );
     checks.push("live-report-stage");
+  }
+
+  if (cancelRunId) {
+    page = await navigate(`/runs/${cancelRunId}`);
+    await waitFor("Boolean(document.querySelector('.run-layout'))", "Abbruch-Testlauf fehlt.");
+    assert(page.text.includes("Lauf abbrechen"), "Abbruch-Aktion fehlt auf der Laufdetailseite.");
+    await evaluate(`(() => {
+      window.confirm = () => true;
+      [...document.querySelectorAll(".run-toolbar__actions button")]
+        .find((button) => button.textContent.includes("Lauf abbrechen")).click();
+      return true;
+    })()`);
+    await waitFor(
+      `document.body.innerText.includes("Abgebrochen")`,
+      "Der Lauf wechselte nach dem Abbruch nicht in den terminalen Zustand.",
+    );
+    checks.push("cancel-run-detail");
   }
 
   if (newspaperId) {
@@ -329,6 +395,14 @@ try {
     JSON.stringify({ ok: true, checks, errors, browserErrors: browserErrors.trim() }, null, 2),
   );
 } finally {
+  if (droppedDocumentId) {
+    await evaluate(`fetch("/api/documents/${droppedDocumentId}", {method: "DELETE"})`).catch(
+      () => {},
+    );
+  }
+  if (cancelRunId) {
+    await evaluate(`fetch("/api/runs/${cancelRunId}", {method: "DELETE"})`).catch(() => {});
+  }
   if (archivedForTest.length) {
     await evaluate(`Promise.all(${JSON.stringify(archivedForTest)}.map((id) =>
       fetch("/api/runs/" + id + "/archive", {

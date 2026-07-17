@@ -44,8 +44,16 @@ async function responseError(response: Response) {
   return body || `${response.status} ${response.statusText}`;
 }
 
-async function getJson<T>(url: string, timeout = REQUEST_TIMEOUT_MS): Promise<T> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(timeout) });
+async function getJson<T>(
+  url: string,
+  timeout = REQUEST_TIMEOUT_MS,
+  signal?: AbortSignal,
+): Promise<T> {
+  const response = await fetch(url, {
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(timeout)])
+      : AbortSignal.timeout(timeout),
+  });
   if (!response.ok) throw new Error(await responseError(response));
   return (await response.json()) as T;
 }
@@ -252,10 +260,26 @@ function historyError(entry: {
   return String(error.exception_message ?? error.node_type ?? "ComfyUI-Ausführung fehlgeschlagen.");
 }
 
+function abortableDelay(milliseconds: number, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 async function generateComfyUiImage(options: {
   config: ComfyUiConfig;
   prompt: string;
   runId: string;
+  signal?: AbortSignal;
   onEvent?: (event: ComfyEvent) => void;
 }) {
   const base = normalizeBaseUrl(options.config.baseUrl);
@@ -271,7 +295,9 @@ async function generateComfyUiImage(options: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt: workflow }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+      : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!queued.ok) throw new Error(`ComfyUI lehnt den Workflow ab: ${await responseError(queued)}`);
   const queuedBody = (await queued.json()) as {
@@ -315,7 +341,11 @@ async function generateComfyUiImage(options: {
           >;
         }
       >
-    >(`${base}/history/${encodeURIComponent(queuedBody.prompt_id)}`);
+    >(
+      `${base}/history/${encodeURIComponent(queuedBody.prompt_id)}`,
+      REQUEST_TIMEOUT_MS,
+      options.signal,
+    );
     const entry = history[queuedBody.prompt_id];
     if (entry?.status?.completed) {
       image = Object.values(entry.outputs ?? {})
@@ -325,7 +355,7 @@ async function generateComfyUiImage(options: {
       break;
     }
     if (entry?.status?.status_str === "error") throw new Error(historyError(entry));
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    await abortableDelay(1_000, options.signal);
   }
   if (!image) throw new Error("ComfyUI hat die Bildgenerierung nicht rechtzeitig abgeschlossen.");
 
@@ -335,7 +365,9 @@ async function generateComfyUiImage(options: {
     type: image.type ?? "output",
   });
   const downloaded = await fetch(`${base}/view?${query}`, {
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+      : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!downloaded.ok)
     throw new Error(`ComfyUI-Bild konnte nicht geladen werden: ${await responseError(downloaded)}`);
@@ -352,6 +384,7 @@ export async function getOrCreateEditorialImage(options: {
   runId: string;
   documentName: string;
   summary: string;
+  signal?: AbortSignal;
   onEvent?: (event: ComfyEvent) => void;
 }) {
   const existing = sqlite
@@ -381,6 +414,7 @@ export async function getOrCreateEditorialImage(options: {
     config,
     prompt,
     runId: options.runId,
+    signal: options.signal,
     onEvent: options.onEvent,
   });
   const id = nanoid();

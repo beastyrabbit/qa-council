@@ -265,9 +265,11 @@ export async function runPiStage(options: {
   systemPrompt: string;
   prompt: string;
   images?: ImageContent[];
+  signal?: AbortSignal;
   onEvent?: (event: { type: string; message: string; data?: unknown }) => void;
   onStream?: (channel: "thinking" | "text", delta: string) => void;
 }): Promise<PiStageResult> {
+  options.signal?.throwIfAborted();
   const registry = providerRegistry();
   const providerName = options.provider === "codex" ? "openai-codex" : options.provider;
   let model = registry.find(providerName, options.modelId);
@@ -276,7 +278,9 @@ export async function runPiStage(options: {
     const row = providerRow("aibox");
     const baseUrl = (row.base_url ?? "http://192.168.10.120:11434").replace(/\/$/, "");
     const info = await aiboxModelInfo(baseUrl, options.modelId);
+    options.signal?.throwIfAborted();
     const runningContext = (await aiboxRunningContexts(baseUrl)).get(options.modelId);
+    options.signal?.throwIfAborted();
     const effectiveContextWindow = Math.min(
       info.contextWindow,
       runningContext ?? info.contextWindow,
@@ -327,6 +331,7 @@ export async function runPiStage(options: {
     systemPrompt: options.systemPrompt,
   });
   await resourceLoader.reload();
+  options.signal?.throwIfAborted();
 
   const { session } = await createAgentSession({
     cwd: process.cwd(),
@@ -359,13 +364,20 @@ export async function runPiStage(options: {
     captured.push(safe);
     options.onEvent?.(safe);
   });
+  const abortSession = () => {
+    void session.abort().catch(() => {});
+  };
+  if (options.signal?.aborted) abortSession();
+  else options.signal?.addEventListener("abort", abortSession, { once: true });
 
   try {
+    options.signal?.throwIfAborted();
     await session.prompt(options.prompt, {
       expandPromptTemplates: false,
       source: "rpc",
       images: options.images,
     });
+    options.signal?.throwIfAborted();
     const message = [...session.messages].reverse().find((entry) => entry.role === "assistant") as
       | AssistantMessage
       | undefined;
@@ -387,6 +399,7 @@ export async function runPiStage(options: {
       events: captured,
     };
   } finally {
+    options.signal?.removeEventListener("abort", abortSession);
     unsubscribe();
     session.dispose();
   }
