@@ -146,10 +146,21 @@ export function compileRaciAssignments(
     if (typeof proposal.rationale !== "string" || !proposal.rationale.trim()) {
       errors.push(`RACI ${proposal.id} hat keine Begründung.`);
     }
-    if (!Array.isArray(proposal.evidence) || proposal.evidence.length === 0) {
+    const normalizedEvidence = Array.isArray(proposal.evidence)
+      ? proposal.evidence.map((locator) => {
+          if (typeof locator !== "string") return locator;
+          const trimmed = locator.trim();
+          if (!allowedLocators || allowedLocators.has(trimmed)) return trimmed;
+          return trimmed
+            .replace(/^(?:---\s*)?CHUNK\s+\d+\/\d+\s*:\s*/i, "")
+            .replace(/\s*---$/, "")
+            .trim();
+        })
+      : [];
+    if (normalizedEvidence.length === 0) {
       errors.push(`RACI ${proposal.id} hat keinen Dokumentbeleg.`);
     } else if (
-      proposal.evidence.some(
+      normalizedEvidence.some(
         (locator) =>
           typeof locator !== "string" ||
           !locator.trim() ||
@@ -180,7 +191,7 @@ export function compileRaciAssignments(
         triggerStatus: proposal.triggerStatus,
         missingInputs: proposal.missingInputs ?? [],
         expectedArtifact: row.artifact,
-        evidence: proposal.evidence ?? [],
+        evidence: normalizedEvidence as string[],
         rationale: proposal.rationale ?? "",
       });
       mandates.set(role, roleMandates);

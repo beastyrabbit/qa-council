@@ -53,4 +53,23 @@ describe("kanonischer RACI-Katalog", () => {
     expect(result.errors).toContain("RACI 9.9 existiert nicht.");
     expect(result.errors).toContain("RACI 3.5: Test-Manager ist keine C-Rolle.");
   });
+
+  it("normalisiert den deterministischen CHUNK-Präfix vor der Locator-Prüfung", () => {
+    const locator = "Offene Entscheidung · Zeilen 17–25";
+    const result = compileRaciAssignments(
+      [
+        {
+          id: "3.5",
+          evidence: [`CHUNK 1/1: ${locator}`],
+          triggerStatus: "satisfied",
+          consultants: [],
+          rationale: "Die Akzeptanzkriterien benötigen eine Prüfung.",
+        },
+      ],
+      new Set([locator]),
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(result.assignments[0].mandates[0].evidence).toEqual([locator]);
+  });
 });

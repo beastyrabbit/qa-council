@@ -93,6 +93,27 @@ describe("persistenter Report-Arbeitsbereich", () => {
         "Der Nachweis entscheidet über die Freigabe",
       );
     await writeFile(newspaperPath, completedNewspaper);
+    const visualPath = path.join(reportWorkspacePath("assemble"), "visual-report", "index.html");
+    const completedVisual = (await readFile(visualPath, "utf8"))
+      .replace(
+        "Die finale Council-Entscheidung prägnant einsetzen",
+        "Freigabe erst nach geschlossenem Nachweis",
+      )
+      .replace(
+        "Begründung, Bedingungen und verbleibendes Restrisiko in drei Sätzen verdichten.",
+        "Die Freigabe bleibt an messbare Nachweise gebunden.",
+      )
+      .replace(
+        "Dringendste Maßnahme mit Owner, Frist und Abnahmekriterium.",
+        "Abnahmekriterien bis Freitag durch das QA-Team dokumentieren.",
+      )
+      .replace(
+        "Das stärkste Gegenargument sichtbar machen",
+        "Der frühe Markttermin bleibt ein relevantes Gegenargument",
+      )
+      .replaceAll("Fundstelle und Aussage ergänzen.", "Review-Fundstelle mit Nachweis verknüpfen.")
+      .replaceAll("Nicht bewertet", "0 von 5");
+    await writeFile(visualPath, completedVisual);
 
     const result = await assembleReportWorkspace({
       runId: "assemble",

@@ -422,9 +422,9 @@ function visualReportHtml(documentName: string) {
         </article>
       </div>
       <div class="visual-chart" aria-label="Belegte Risikoverteilung">
-        <label>Produktqualität <meter class="visual-chart__row" min="0" max="5" value="3">3 von 5</meter></label>
-        <label>Betriebsrisiko <meter class="visual-chart__row" min="0" max="5" value="4">4 von 5</meter></label>
-        <label>Nachweisreife <meter class="visual-chart__row" min="0" max="5" value="2">2 von 5</meter></label>
+        <label>Produktqualität <meter class="visual-chart__row" min="0" max="5" value="0">Nicht bewertet</meter></label>
+        <label>Betriebsrisiko <meter class="visual-chart__row" min="0" max="5" value="0">Nicht bewertet</meter></label>
+        <label>Nachweisreife <meter class="visual-chart__row" min="0" max="5" value="0">Nicht bewertet</meter></label>
       </div>
     </section>
 
@@ -973,6 +973,12 @@ function validateHtmlSafety(source: string, label: string) {
     "Die wichtigste Entscheidung gehört hierher",
     "Die dringendste belegte Maßnahme einsetzen",
     "Die stärkste Aussage dieses Ressorts einsetzen",
+    "Die finale Council-Entscheidung prägnant einsetzen",
+    "Begründung, Bedingungen und verbleibendes Restrisiko in drei Sätzen verdichten.",
+    "Dringendste Maßnahme mit Owner, Frist und Abnahmekriterium.",
+    "Das stärkste Gegenargument sichtbar machen",
+    "Fundstelle und Aussage ergänzen.",
+    "Nicht bewertet",
   ];
   for (const placeholder of templatePlaceholders) {
     if (source.includes(placeholder)) {
@@ -1148,6 +1154,14 @@ export function validateReportWorkspaceFiles(
     findings.push(
       `Struktur · Der Visual Report braucht genau einen {{EDITORIAL_IMAGE}}-Hook, gefunden: ${visualImageHooks}.`,
     );
+  }
+  for (const hook of ["{{REPORT_IMAGE_EVIDENCE}}", "{{REPORT_IMAGE_ROADMAP}}"]) {
+    const count = (onepaper.match(new RegExp(hook.replace(/[{}]/g, "\\$&"), "g")) ?? []).length;
+    if (count !== 1) {
+      findings.push(
+        `Struktur · Der Visual Report braucht genau einen ${hook}-Hook, gefunden: ${count}.`,
+      );
+    }
   }
   for (const className of [
     "onepaper-sheet",

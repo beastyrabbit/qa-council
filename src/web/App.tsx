@@ -183,6 +183,8 @@ const SYSTEM_EVENTS = new Set([
   "report_workspace_scaffolded",
   "report_static_check_completed",
   "report_static_feedback_sent",
+  "workspace_tool_start",
+  "workspace_tool_end",
   "report_static_recheck_completed",
   "presentation_started",
   "presentation_completed",
@@ -218,6 +220,9 @@ function RunView({
   const [liveFollow, setLiveFollow] = useState(true);
   const [cancelling, setCancelling] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const terminal = Boolean(
+    details && ["completed", "failed", "cancelled"].includes(details.run.status),
+  );
   const load = useCallback(() => {
     void api<RunDetails>(`/api/runs/${id}`)
       .then(setDetails)
@@ -226,9 +231,13 @@ function RunView({
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  useEffect(() => {
+    if (terminal) return;
     const timer = window.setInterval(load, 750);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [load, terminal]);
 
   useEffect(() => {
     if (
@@ -1349,10 +1358,10 @@ function ComparisonView({
               <button
                 className="button button--primary"
                 type="button"
-                disabled={run.status !== "completed"}
+                disabled={!run.hasResult}
                 onClick={() => onResult(run.id)}
               >
-                Resultat
+                {run.status === "completed" ? "Resultat" : "Text-Ergebnis"}
               </button>
             </footer>
           </article>
@@ -2410,13 +2419,13 @@ export function App() {
                       >
                         Details
                       </button>
-                      {run.status === "completed" && (
+                      {run.hasResult && (
                         <button
                           className="button button--primary"
                           type="button"
                           onClick={() => void openRunResult(run.id)}
                         >
-                          Resultat
+                          {run.status === "completed" ? "Resultat" : "Text-Ergebnis"}
                         </button>
                       )}
                       {["completed", "failed", "cancelled"].includes(run.status) && (

@@ -342,10 +342,7 @@ export async function createPresentation(options: {
       if (id) {
         generatedSlots.set(slot.hook, {
           id,
-          html: `<figure class="editorial-image visual-image">
-            <img src="/api/images/${id}" alt="${escapeHtml(slot.alt)}" loading="eager">
-            <figcaption>Dokumentbezogenes Motiv · für diesen QA-Lauf erzeugt</figcaption>
-          </figure>`,
+          html: `<img src="/api/images/${id}" alt="${escapeHtml(slot.alt)}" loading="eager">`,
         });
       }
     }),

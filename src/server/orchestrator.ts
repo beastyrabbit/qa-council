@@ -960,7 +960,7 @@ Dateiänderungen aus.
 
 FINALES COUNCIL-ERGEBNIS:
 ${finalMarkdown}`;
-    await Promise.all([
+    await settleParallel([
       runStage({
         run,
         name: "Report-Build · Tageszeitung",
@@ -1026,7 +1026,7 @@ ${commonBuilderPrompt}`,
       const staticFeedback = reportValidation.findings
         .map((finding, index) => `${index + 1}. ${finding}`)
         .join("\n");
-      await Promise.all([
+      await settleParallel([
         runStage({
           run,
           name: "Report-Fix · Tageszeitung",
@@ -1109,7 +1109,7 @@ betreffen. Bewahre belegte Inhalte und Bild-Slots. Antworte nur mit einer Änder
     const vision = await modelSupportsVision(run.provider, run.model);
     const reviewImages: ImageContent[] = [];
     if (vision && run.provider !== "aibox") {
-      const [newspaperShot, visualShot] = await Promise.all([
+      const [newspaperShot, visualShot] = await settleParallel([
         createPresentationScreenshot(
           candidateNewspaper.html,
           "Zeitungs-Titelseite",
@@ -1132,7 +1132,7 @@ betreffen. Bewahre belegte Inhalte und Bild-Slots. Antworte nur mit einer Änder
       reviewers: ["code-quality", "visual-design", "content-traceability"],
       screenshots: reviewImages.length,
     });
-    const [codeReview, designReview, contentReview] = await Promise.all([
+    const [codeReview, designReview, contentReview] = await settleParallel([
       runStage({
         run,
         name: "Report-Review · Code-Qualität",
@@ -1194,7 +1194,7 @@ ${reportAssembly.snapshot}`,
     event(runId, "parallel_stage_group_started", "Finale Report-Anpassungen laufen parallel", {
       branches: ["newspaper", "visual-report"],
     });
-    await Promise.all([
+    await settleParallel([
       runStage({
         run,
         name: "Report-Final-Patch · Tageszeitung",
@@ -1226,9 +1226,48 @@ ${consolidatedFindings}`,
     ]);
     reportValidation = await validateReportWorkspace(runId, expectedPageSlugs);
     if (!reportValidation.valid) {
-      throw new Error(
-        `Finale Report-Patches haben die statische Prüfung nicht bestanden: ${reportValidation.findings.join(" ")}`,
+      const finalStaticFeedback = reportValidation.findings
+        .map((finding, index) => `${index + 1}. ${finding}`)
+        .join("\n");
+      event(
+        runId,
+        "report_static_feedback_sent",
+        "Befunde der finalen statischen Prüfung werden an die Datei-Agenten zurückgegeben",
+        { findings: reportValidation.findings, phase: "final" },
+        "warning",
       );
+      await settleParallel([
+        runStage({
+          run,
+          name: "Report-Schlusskorrektur · Tageszeitung",
+          prompt: `Die finale statische Prüfung meldet folgende Befunde:\n${finalStaticFeedback}\n
+Lies die bestehenden Dateien und korrigiere mit edit ausschließlich die Befunde der
+Tageszeitung. Bewahre Inhalte, Seiten und Bild-Hooks. Keine neuen Dateien.`,
+          progress: 97,
+          kind: "report-final-static-fix-newspaper",
+          systemPrompt: reportDesignerSystemPrompt(true),
+          workspaceDir: workspace.newspaper.root,
+          toolMode: "read-edit",
+        }),
+        runStage({
+          run,
+          name: "Report-Schlusskorrektur · Visual Report",
+          prompt: `Die finale statische Prüfung meldet folgende Befunde:\n${finalStaticFeedback}\n
+Lies die bestehenden Dateien und korrigiere mit edit ausschließlich die Befunde des
+Visual Reports. Bewahre belegte Infografiken und alle drei Bild-Hooks. Keine neuen Dateien.`,
+          progress: 97,
+          kind: "report-final-static-fix-visual",
+          systemPrompt: reportDesignerSystemPrompt(true),
+          workspaceDir: workspace.visualReport.root,
+          toolMode: "read-edit",
+        }),
+      ]);
+      reportValidation = await validateReportWorkspace(runId, expectedPageSlugs);
+      if (!reportValidation.valid) {
+        throw new Error(
+          `Finale Report-Patches haben die statische Prüfung nicht bestanden: ${reportValidation.findings.join(" ")}`,
+        );
+      }
     }
     reportAssembly = await assembleReportWorkspace({ runId, expectedPageSlugs });
     artifact(
@@ -1249,7 +1288,7 @@ ${consolidatedFindings}`,
     const presentationIds: Partial<Record<PresentationKind, string>> = {
       text: textPresentationId,
     };
-    await Promise.all(
+    await settleParallel(
       presentationOrder.map(async (kind) => {
         controller.signal.throwIfAborted();
         const workspaceKind = kind === "newspaper" ? "newspaper" : "visual-report";

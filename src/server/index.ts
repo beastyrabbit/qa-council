@@ -101,6 +101,7 @@ function runDto(row: Record<string, unknown>): RunRecord {
     progress: Number(row.progress),
     currentStage: row.current_stage as string | null,
     error: row.error as string | null,
+    hasResult: Boolean(row.has_result),
     createdAt: String(row.created_at),
     completedAt: row.completed_at as string | null,
     archivedAt: row.archived_at as string | null,
@@ -212,7 +213,9 @@ app.delete("/api/documents/:id", async (request, reply) => {
 app.get("/api/runs", async () => {
   const rows = sqlite
     .prepare(
-      `SELECT r.*, d.name AS document_name FROM runs r JOIN documents d ON d.id = r.document_id
+      `SELECT r.*, d.name AS document_name,
+              EXISTS(SELECT 1 FROM presentations p WHERE p.run_id = r.id) AS has_result
+       FROM runs r JOIN documents d ON d.id = r.document_id
        WHERE r.comparison_id IS NULL
        ORDER BY r.created_at DESC`,
     )
@@ -306,7 +309,9 @@ const createComparisonSchema = z.object({
 function comparisonDto(row: Record<string, unknown>): ComparisonRecord {
   const runRows = sqlite
     .prepare(
-      `SELECT r.*, d.name AS document_name FROM runs r
+      `SELECT r.*, d.name AS document_name,
+              EXISTS(SELECT 1 FROM presentations p WHERE p.run_id = r.id) AS has_result
+       FROM runs r
        JOIN documents d ON d.id = r.document_id
        WHERE r.comparison_id = ? ORDER BY r.created_at, r.provider`,
     )

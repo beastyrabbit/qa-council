@@ -43,6 +43,7 @@ export interface RunRecord {
   progress: number;
   currentStage?: string | null;
   error?: string | null;
+  hasResult?: boolean;
   createdAt: string;
   completedAt?: string | null;
   archivedAt?: string | null;
