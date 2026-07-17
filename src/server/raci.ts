@@ -203,8 +203,21 @@ export function compileRaciAssignments(
         add(role, responsibility);
       }
     }
+    const roleAliases = new Map<string, QaRole>([
+      ["qa architect", "QA-Architekt"],
+      ["test manager", "Test-Manager"],
+      ["test analyst", "Test-Analyst"],
+      ["test automation engineer", "Test-Automation-Engineer"],
+    ]);
     const consultants = Array.isArray(proposal.consultants)
-      ? [...new Set(proposal.consultants)]
+      ? [
+          ...new Set(
+            proposal.consultants.map(
+              (consultant) =>
+                roleAliases.get(String(consultant).trim().toLowerCase()) ?? consultant,
+            ),
+          ),
+        ]
       : [];
     for (const consultant of consultants) {
       if (!QA_ROLES.includes(consultant as QaRole)) {

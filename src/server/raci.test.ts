@@ -72,4 +72,24 @@ describe("kanonischer RACI-Katalog", () => {
     expect(result.errors).toEqual([]);
     expect(result.assignments[0].mandates[0].evidence).toEqual([locator]);
   });
+
+  it("normalisiert eindeutige englische Rollen-Aliase aus Modellantworten", () => {
+    const result = compileRaciAssignments([
+      {
+        id: "1.4",
+        evidence: ["Akzeptanzkriterien"],
+        triggerStatus: "satisfied",
+        consultants: ["Test Automation Engineer"],
+        rationale: "Die Automatisierbarkeit muss konsultativ bewertet werden.",
+      },
+    ]);
+
+    expect(result.errors).toEqual([]);
+    expect(result.assignments).toContainEqual(
+      expect.objectContaining({
+        role: "Test-Automation-Engineer",
+        participation: "consulted",
+      }),
+    );
+  });
 });
