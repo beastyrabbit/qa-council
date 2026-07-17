@@ -2236,8 +2236,11 @@ export function App() {
                   <select
                     value={provider}
                     onChange={(event) => {
-                      setModelAvailable(false);
-                      setProvider(event.target.value as ProviderId);
+                      const nextProvider = event.target.value as ProviderId;
+                      if (nextProvider !== provider) {
+                        setModelAvailable(false);
+                        setProvider(nextProvider);
+                      }
                     }}
                   >
                     {(Object.keys(PROVIDER_NAMES) as ProviderId[]).map((id) => (
