@@ -454,6 +454,11 @@ textarea:focus-visible {
   border-color: #aabd9f;
   background: #eef3e7;
 }
+.file-state--uploaded {
+  color: #31536a;
+  border-color: #a9c3d2;
+  background: #eaf3f8;
+}
 .file-state--failed,
 .status--error {
   color: #853a31;

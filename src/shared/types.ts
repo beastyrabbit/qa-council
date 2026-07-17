@@ -18,7 +18,7 @@ export interface DocumentRecord {
   mimeType: string;
   size: number;
   sha256: string;
-  status: "extracting" | "ready" | "failed";
+  status: "uploaded" | "extracting" | "ready" | "failed";
   createdAt: string;
   error?: string | null;
 }

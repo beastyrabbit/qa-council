@@ -92,10 +92,12 @@ Im Kubernetes-Betrieb liegt das gesamte Verzeichnis unter `/data` auf einem Long
 
 ### Dokument bleibt auf Fehler
 
+- Im Laufprotokoll die Stufe **Dokumentextraktion** und deren Seitenfortschritt prüfen.
 - Bei Textdateien Encoding und tatsächlichen Inhalt prüfen.
 - Bei Binärformaten `TIKA_URL` und `/version` prüfen.
 - Tika-Ressourcen und Pod-Logs prüfen.
-- Das Dokument zeigt die Extraktionsfehlermeldung in der Dateiliste.
+- Ein fehlgeschlagener Seitenversuch blockiert andere Seiten nicht und wird bei einem neuen Lauf
+  erneut versucht.
 
 ### Provider ist nicht konfiguriert
 

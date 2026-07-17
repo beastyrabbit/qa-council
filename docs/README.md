@@ -29,7 +29,10 @@ QA Council ist eine Webanwendung für nachvollziehbare, mehrstufige Qualitätspr
 - OpenDocument
 - RTF und MSG
 
-Textformate werden direkt gelesen. Binärformate werden über Apache Tika extrahiert. Die initiale Uploadgrenze beträgt 50 MiB.
+Der Upload speichert zunächst ausschließlich das Original. Die Extraktion startet sichtbar als
+erster Schritt nach **Go**. Textformate werden direkt gelesen; Binärformate nutzen Tika sowie eine
+begrenzte seitenweise Layout- und Bildanalyse. Fertige Seiten und vollständige Ergebnisse werden
+persistiert und per Dokument-Hash wiederverwendet. Die initiale Uploadgrenze beträgt 50 MiB.
 
 ## Ergebnisse
 

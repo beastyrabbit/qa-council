@@ -4,7 +4,8 @@ QA Council prüft hochgeladene Dokumente mit einem nachvollziehbaren Multi-Rolle
 
 ## Funktionsumfang
 
-- Upload von Text/Markdown sowie PDF-, Office-, OpenDocument-, RTF- und MSG-Dateien über Apache Tika
+- sofortiger Upload ohne Vorabextraktion; sichtbare, resumierbare Seitenextraktion als erster
+  Lauf-Schritt mit Tika, PDF-Layout, Codex-Bildbeschreibung und Hash-Cache
 - lückenlose Chunk-Verarbeitung mit Locator, Hash und Coverage-Manifest
 - Anbieterwahl zwischen serverseitigem Codex-OAuth, OpenRouter und lokaler Ollama-kompatibler AI Box
 - Council-Modi Auto, Quick, Standard und Deep

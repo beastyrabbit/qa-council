@@ -108,6 +108,17 @@ const FORMAT_NAMES: Record<PresentationKind, string> = {
   onepaper: "Visual Report",
 };
 
+type MainView = "review" | "documents" | "runs" | "tests" | "archive" | "settings";
+
+const VIEW_PATHS: Record<MainView, string> = {
+  review: "/pruefen",
+  documents: "/dokumente",
+  runs: "/laeufe",
+  tests: "/tests",
+  archive: "/archiv",
+  settings: "/einstellungen",
+};
+
 function shortDate(value: string) {
   return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" }).format(
     new Date(value),
@@ -120,6 +131,13 @@ function formatSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+const DOCUMENT_STATUS_NAMES: Record<DocumentRecord["status"], string> = {
+  uploaded: "Gerade hochgeladen",
+  extracting: "Extraktion läuft",
+  ready: "Extrahiert",
+  failed: "Extraktion fehlgeschlagen",
+};
+
 function formatModelPrice(value: number | undefined) {
   if (value === undefined) return "–";
   if (value === 0) return "$0";
@@ -128,16 +146,28 @@ function formatModelPrice(value: number | undefined) {
   return `$${value.toFixed(value < 10 ? 2 : 0)}`;
 }
 
-function routeFromPath(pathname = window.location.pathname) {
-  const run = pathname.match(/^\/runs\/([^/]+)$/);
+export function routeFromPath(pathname = window.location.pathname) {
+  const run = pathname.match(/^\/(?:laeufe|runs)\/([^/]+)$/);
   const comparisonRun = pathname.match(/^\/tests\/([^/]+)\/runs\/([^/]+)$/);
   const comparison = pathname.match(/^\/tests\/([^/]+)$/);
-  const document = pathname.match(/^\/documents\/([^/]+)$/);
+  const document = pathname.match(/^\/(?:dokumente|documents)\/([^/]+)$/);
   const result = pathname.match(/^\/results\/([^/]+)(?:\/([^/]+))?$/);
+  const view: MainView =
+    pathname === "/dokumente" || pathname === "/documents" || document
+      ? "documents"
+      : pathname === "/laeufe" || pathname === "/runs" || run
+        ? "runs"
+        : pathname === "/tests" || comparisonRun || comparison
+          ? "tests"
+          : pathname === "/archiv"
+            ? "archive"
+            : pathname === "/einstellungen"
+              ? "settings"
+              : "review";
   return {
+    view,
     runId: run?.[1] ?? comparisonRun?.[2] ?? null,
     comparisonId: comparisonRun?.[1] ?? comparison?.[1] ?? null,
-    testMode: pathname === "/tests" || Boolean(comparisonRun || comparison),
     documentId: document?.[1] ?? null,
     presentationId: result?.[1] ?? null,
     presentationPage: result?.[2] ?? null,
@@ -171,6 +201,10 @@ function VersionFooter() {
 
 const SYSTEM_EVENTS = new Set([
   "run_started",
+  "document_extraction_started",
+  "document_extraction_progress",
+  "document_extraction_reused",
+  "document_extraction_resumed",
   "council_composed",
   "input_required",
   "input_answered",
@@ -589,12 +623,23 @@ function DocumentView({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    Promise.all([api<DocumentDetails>(`/api/documents/${id}`), api<RunRecord[]>("/api/runs")])
-      .then(([details, allRuns]) => {
-        setDocument(details);
-        setRuns(allRuns.filter((run) => run.documentId === id));
-      })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
+    let active = true;
+    const refresh = () =>
+      Promise.all([api<DocumentDetails>(`/api/documents/${id}`), api<RunRecord[]>("/api/runs")])
+        .then(([details, allRuns]) => {
+          if (!active) return;
+          setDocument(details);
+          setRuns(allRuns.filter((run) => run.documentId === id));
+        })
+        .catch((reason) => {
+          if (active) setError(reason instanceof Error ? reason.message : String(reason));
+        });
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 2_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, [id]);
 
   return (
@@ -630,7 +675,13 @@ function DocumentView({
           </header>
           <section>
             <h2>Extrahierter Inhalt</h2>
-            <pre>{document.extractedText || "Kein extrahierter Text vorhanden."}</pre>
+            <pre>
+              {document.status === "uploaded"
+                ? "Gerade hochgeladen. Die Extraktion startet als erster Schritt nach „Go“."
+                : document.status === "extracting"
+                  ? "Die Extraktion läuft gerade in einem Council-Lauf."
+                  : document.extractedText || document.error || "Kein extrahierter Text vorhanden."}
+            </pre>
           </section>
           <section>
             <h2>Bisherige Läufe</h2>
@@ -1038,11 +1089,13 @@ const TEST_PROVIDERS: ProviderId[] = ["codex", "openrouter", "aibox"];
 
 function TestModeView({
   settings,
+  documents,
   comparisons,
   onChanged,
   onOpen,
 }: {
   settings: AppSettings;
+  documents: DocumentRecord[];
   comparisons: ComparisonRecord[];
   onChanged: () => Promise<void>;
   onOpen: (id: string) => void;
@@ -1070,6 +1123,12 @@ function TestModeView({
   const [starting, setStarting] = useState(false);
   const [message, setMessage] = useState("");
 
+  useEffect(() => {
+    if (!document) return;
+    const updated = documents.find((item) => item.id === document.id);
+    if (updated && updated !== document) setDocument(updated);
+  }, [document, documents]);
+
   async function uploadTestFile(file?: File) {
     if (!file) return;
     setUploading(true);
@@ -1079,8 +1138,8 @@ function TestModeView({
     try {
       const uploaded = await api<DocumentRecord>("/api/documents", { method: "POST", body });
       setDocument(uploaded);
-      if (uploaded.status !== "ready") {
-        setMessage(uploaded.error ?? "Die Datei konnte nicht gelesen werden.");
+      if (uploaded.status === "failed") {
+        setMessage(uploaded.error ?? "Die vorherige Extraktion war fehlgeschlagen.");
       }
       await onChanged();
     } catch (reason) {
@@ -1165,7 +1224,7 @@ function TestModeView({
             <strong>{document?.name ?? "Vergleichsdokument hochladen"}</strong>
             <small>
               {document
-                ? `${formatSize(document.size)} · bereit für den Vergleich`
+                ? `${formatSize(document.size)} · hochgeladen · Extraktion startet mit den Läufen`
                 : "Auswählen oder hier ablegen · Markdown, Text, PDF, DOCX oder HTML · maximal 50 MB"}
             </small>
           </span>
@@ -1252,7 +1311,9 @@ function TestModeView({
           <button
             className="button button--primary"
             type="button"
-            disabled={document?.status !== "ready" || selectedCount === 0 || starting}
+            disabled={
+              !document || document.status === "extracting" || selectedCount === 0 || starting
+            }
             onClick={() => void startComparison()}
           >
             {starting ? <LoaderCircle className="spin" size={17} /> : <FlaskConical size={17} />}
@@ -1699,9 +1760,7 @@ function SettingsView({
 
 export function App() {
   const initialRoute = routeFromPath();
-  const [view, setView] = useState<
-    "review" | "documents" | "runs" | "tests" | "archive" | "settings"
-  >(initialRoute.testMode ? "tests" : "review");
+  const [view, setView] = useState<MainView>(initialRoute.view);
   const [mobileNav, setMobileNav] = useState(false);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [runs, setRuns] = useState<RunRecord[]>([]);
@@ -1734,22 +1793,30 @@ export function App() {
     setRuns(runItems);
     setComparisons(comparisonItems);
     setSettings(appSettings);
-    setSelected((current) => current || docs.find((doc) => doc.status === "ready")?.id || "");
+    setSelected((current) => current || docs.find((doc) => doc.status !== "extracting")?.id || "");
   }, []);
 
   useEffect(() => {
     void load().catch((reason) => setMessage(reason.message));
     const timer = window.setInterval(() => {
       void Promise.all([
+        api<DocumentRecord[]>("/api/documents"),
         api<RunRecord[]>("/api/runs"),
         api<ComparisonRecord[]>("/api/comparisons"),
-      ]).then(([runItems, comparisonItems]) => {
+      ]).then(([documentItems, runItems, comparisonItems]) => {
+        setDocuments(documentItems);
         setRuns(runItems);
         setComparisons(comparisonItems);
       });
     }, 2_000);
     return () => window.clearInterval(timer);
   }, [load]);
+
+  useEffect(() => {
+    if (window.location.pathname === "/") {
+      window.history.replaceState({}, "", VIEW_PATHS.review);
+    }
+  }, []);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -1759,14 +1826,25 @@ export function App() {
       setComparisonId(route.comparisonId);
       setResultId(route.presentationId);
       setResultPage(route.presentationPage);
-      if (route.testMode) setView("tests");
+      setView(route.view);
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
+  const navigateView = useCallback((nextView: MainView) => {
+    window.history.pushState({}, "", VIEW_PATHS[nextView]);
+    setDocumentId(null);
+    setDetailId(null);
+    setComparisonId(null);
+    setResultId(null);
+    setResultPage(null);
+    setView(nextView);
+    setMobileNav(false);
+  }, []);
+
   const openRun = useCallback((id: string) => {
-    window.history.pushState({}, "", `/runs/${id}`);
+    window.history.pushState({}, "", `/laeufe/${id}`);
     setDocumentId(null);
     setResultId(null);
     setResultPage(null);
@@ -1806,7 +1884,7 @@ export function App() {
   }, []);
 
   const openDocument = useCallback((id: string) => {
-    window.history.pushState({}, "", `/documents/${id}`);
+    window.history.pushState({}, "", `/dokumente/${id}`);
     setDetailId(null);
     setComparisonId(null);
     setResultId(null);
@@ -1816,16 +1894,17 @@ export function App() {
   }, []);
 
   const closePage = useCallback(() => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", VIEW_PATHS.runs);
     setDocumentId(null);
     setDetailId(null);
     setResultId(null);
     setResultPage(null);
     setComparisonId(null);
+    setView("runs");
   }, []);
 
   const closeDocument = useCallback(() => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", VIEW_PATHS.documents);
     setDocumentId(null);
     setDetailId(null);
     setResultId(null);
@@ -1834,7 +1913,7 @@ export function App() {
   }, []);
 
   const reviewDocument = useCallback((id: string) => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", VIEW_PATHS.review);
     setSelected(id);
     setDocumentId(null);
     setDetailId(null);
@@ -1873,8 +1952,10 @@ export function App() {
     try {
       const document = await api<DocumentRecord>("/api/documents", { method: "POST", body });
       await load();
-      if (document.status === "ready") setSelected(document.id);
-      else setMessage(document.error ?? "Die Datei konnte nicht gelesen werden.");
+      setSelected(document.id);
+      if (document.status === "failed") {
+        setMessage(document.error ?? "Die vorherige Extraktion war fehlgeschlagen.");
+      }
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -2036,61 +2117,42 @@ export function App() {
           <button
             type="button"
             className={view === "review" ? "active" : ""}
-            onClick={() => {
-              setView("review");
-              setMobileNav(false);
-            }}
+            onClick={() => navigateView("review")}
           >
             <Sheet size={18} /> Prüfen
           </button>
           <button
             type="button"
             className={view === "documents" ? "active" : ""}
-            onClick={() => {
-              setView("documents");
-              setMobileNav(false);
-            }}
+            onClick={() => navigateView("documents")}
           >
             <FolderOpen size={18} /> Dokumente
           </button>
           <button
             type="button"
             className={view === "runs" ? "active" : ""}
-            onClick={() => {
-              setView("runs");
-              setMobileNav(false);
-            }}
+            onClick={() => navigateView("runs")}
           >
             <Newspaper size={18} /> Läufe
           </button>
           <button
             type="button"
             className={view === "tests" ? "active" : ""}
-            onClick={() => {
-              window.history.pushState({}, "", "/tests");
-              setView("tests");
-              setMobileNav(false);
-            }}
+            onClick={() => navigateView("tests")}
           >
             <FlaskConical size={18} /> Testmodus
           </button>
           <button
             type="button"
             className={view === "archive" ? "active" : ""}
-            onClick={() => {
-              setView("archive");
-              setMobileNav(false);
-            }}
+            onClick={() => navigateView("archive")}
           >
             <Archive size={18} /> Archiv
           </button>
           <button
             type="button"
             className={view === "settings" ? "active" : ""}
-            onClick={() => {
-              setView("settings");
-              setMobileNav(false);
-            }}
+            onClick={() => navigateView("settings")}
           >
             <Settings size={18} /> Einstellungen
           </button>
@@ -2107,6 +2169,7 @@ export function App() {
         {view === "tests" && settings ? (
           <TestModeView
             settings={settings}
+            documents={documents}
             comparisons={comparisons}
             onChanged={load}
             onOpen={openComparison}
@@ -2132,11 +2195,7 @@ export function App() {
                       </small>
                     </div>
                     <span className={`file-state file-state--${document.status}`}>
-                      {document.status === "ready"
-                        ? "Bereit"
-                        : document.status === "extracting"
-                          ? "Wird gelesen"
-                          : "Fehler"}
+                      {DOCUMENT_STATUS_NAMES[document.status]}
                     </span>
                     <button
                       className="button button--quiet"
@@ -2148,7 +2207,7 @@ export function App() {
                     <button
                       className="button button--primary"
                       type="button"
-                      disabled={document.status !== "ready"}
+                      disabled={document.status === "extracting"}
                       onClick={() => reviewDocument(document.id)}
                     >
                       Erneut prüfen
@@ -2201,7 +2260,7 @@ export function App() {
               />
               {uploading ? <LoaderCircle className="spin" size={25} /> : <Upload size={25} />}
               <span>
-                <strong>{uploading ? "Datei wird gelesen …" : "Datei hochladen"}</strong>
+                <strong>{uploading ? "Datei wird hochgeladen …" : "Datei hochladen"}</strong>
                 <small>
                   Auswählen oder hier ablegen · Text, Markdown, PDF, Office, OpenDocument, RTF oder
                   MSG · maximal 50 MB
@@ -2217,14 +2276,17 @@ export function App() {
               <div className="selected-document">
                 <FileText size={18} />
                 <div>
-                  <span>Ausgewähltes Dokument</span>
+                  <span>
+                    Ausgewähltes Dokument
+                    {selectedDocument ? ` · ${DOCUMENT_STATUS_NAMES[selectedDocument.status]}` : ""}
+                  </span>
                   <strong>{selectedDocument?.name ?? "Noch kein Dokument ausgewählt"}</strong>
                 </div>
                 <div className="selected-document__actions">
                   <button
                     className="button button--quiet"
                     type="button"
-                    onClick={() => setView("documents")}
+                    onClick={() => navigateView("documents")}
                   >
                     {selectedDocument ? "Ändern" : "Dokument wählen"}
                   </button>

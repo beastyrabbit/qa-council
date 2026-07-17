@@ -3,9 +3,10 @@ import { nanoid } from "nanoid";
 import type { CouncilMode, ImageProvider, PresentationKind, ProviderId } from "../shared/types.js";
 import { councilRoundCount, crossReviewPasses } from "./council-plan.js";
 import { sqlite } from "./db/index.js";
+import { type ExtractedDocument, extractDocument, extractionFingerprint } from "./extract.js";
 import { createPresentationScreenshot } from "./pdf.js";
 import { createPresentation, splitNewspaperSections } from "./presentation.js";
-import { modelSupportsVision, runPiStage } from "./providers.js";
+import { modelSupportsVision, providerRow, runPiStage } from "./providers.js";
 import {
   compileRaciAssignments,
   formatRoleMandates,
@@ -40,6 +41,9 @@ interface RunRow {
   image_provider: ImageProvider | null;
   focus: string | null;
   extracted_text: string;
+  document_status: string;
+  document_mime_type: string;
+  document_original: Buffer;
 }
 
 interface StageResult {
@@ -49,6 +53,14 @@ interface StageResult {
 
 const activeRuns = new Set<string>();
 const activeRunControllers = new Map<string, AbortController>();
+const activeDocumentExtractions = new Map<
+  string,
+  {
+    controller: AbortController;
+    consumers: Map<string, string>;
+    promise: Promise<ExtractedDocument>;
+  }
+>();
 
 function now() {
   return new Date().toISOString();
@@ -303,6 +315,344 @@ async function runStage(options: {
   }
 }
 
+function waitForExtraction(
+  promise: Promise<ExtractedDocument>,
+  signal: AbortSignal,
+): Promise<ExtractedDocument> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function ensureDocumentExtraction(run: RunRow, signal: AbortSignal) {
+  const stageId = nanoid();
+  const stageName = "Dokumentextraktion";
+  sqlite
+    .prepare(
+      `INSERT INTO run_stages(id, run_id, name, status, started_at)
+       VALUES (?, ?, ?, 'running', ?)`,
+    )
+    .run(stageId, run.id, stageName, now());
+  sqlite
+    .prepare("UPDATE runs SET current_stage = ?, progress = MAX(progress, 5) WHERE id = ?")
+    .run(stageName, run.id);
+  event(
+    run.id,
+    "stage_started",
+    `${stageName} gestartet`,
+    { documentId: run.document_id },
+    "info",
+    stageId,
+  );
+
+  try {
+    const currentDocument = sqlite
+      .prepare(
+        `SELECT status, extracted_text, extraction_fingerprint, extraction_complete
+         FROM documents WHERE id = ?`,
+      )
+      .get(run.document_id) as {
+      status: string;
+      extracted_text: string | null;
+      extraction_fingerprint: string | null;
+      extraction_complete: number;
+    };
+    const expectedFingerprint = extractionFingerprint(
+      run.document_name,
+      run.document_mime_type,
+      providerRow("codex").model,
+    );
+    const cacheCompatible = currentDocument.extraction_fingerprint === expectedFingerprint;
+    const existingChunks = sqlite
+      .prepare("SELECT COUNT(*) AS count FROM document_chunks WHERE document_id = ?")
+      .get(run.document_id) as { count: number };
+    const pageErrors = sqlite
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM document_extraction_pages
+         WHERE document_id = ? AND error IS NOT NULL`,
+      )
+      .get(run.document_id) as { count: number };
+    let extracted: ExtractedDocument;
+    let reused = false;
+    if (
+      cacheCompatible &&
+      currentDocument.extraction_complete === 1 &&
+      currentDocument.extracted_text &&
+      existingChunks.count > 0 &&
+      pageErrors.count === 0
+    ) {
+      reused = true;
+      sqlite
+        .prepare("UPDATE documents SET status = 'ready', error = NULL WHERE id = ?")
+        .run(run.document_id);
+      extracted = {
+        text: currentDocument.extracted_text,
+        method: "direct",
+        chunks: [],
+        degraded: [],
+      };
+      event(
+        run.id,
+        "document_extraction_reused",
+        "Vorhandene Dokumentextraktion wird wiederverwendet",
+        { documentId: run.document_id, chunks: existingChunks.count },
+        "info",
+        stageId,
+      );
+    } else {
+      let active = activeDocumentExtractions.get(run.document_id);
+      if (active?.controller.signal.aborted) {
+        await active.promise.catch(() => undefined);
+        active = activeDocumentExtractions.get(run.document_id);
+      }
+      if (!active) {
+        event(
+          run.id,
+          "document_extraction_started",
+          "Originaldatei wird jetzt extrahiert",
+          { documentId: run.document_id },
+          "info",
+          stageId,
+        );
+        const extractionController = new AbortController();
+        const consumers = new Map<string, string>([[run.id, stageId]]);
+        const promise = (async () => {
+          const cachedPages = cacheCompatible
+            ? new Map(
+                (
+                  sqlite
+                    .prepare(
+                      `SELECT page, total_pages, unit, content
+                       FROM document_extraction_pages
+                       WHERE document_id = ? AND error IS NULL
+                       ORDER BY page`,
+                    )
+                    .all(run.document_id) as Array<{
+                    page: number;
+                    total_pages: number;
+                    unit: "Folie" | "Seite";
+                    content: string;
+                  }>
+                ).map((page) => [
+                  page.page,
+                  {
+                    content: page.content,
+                    total: page.total_pages,
+                    unit: page.unit,
+                  },
+                ]),
+              )
+            : new Map<number, { content: string; total: number; unit: "Folie" | "Seite" }>();
+          const upsertPage = sqlite.prepare(
+            `INSERT INTO document_extraction_pages(
+               id, document_id, page, total_pages, unit, content, error, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(document_id, page) DO UPDATE SET
+               total_pages = excluded.total_pages,
+               unit = excluded.unit,
+               content = excluded.content,
+               error = excluded.error,
+               updated_at = excluded.updated_at`,
+          );
+          sqlite.transaction(() => {
+            if (!cacheCompatible) {
+              sqlite
+                .prepare("DELETE FROM document_extraction_pages WHERE document_id = ?")
+                .run(run.document_id);
+              sqlite
+                .prepare("DELETE FROM document_chunks WHERE document_id = ?")
+                .run(run.document_id);
+            }
+            sqlite
+              .prepare(
+                `UPDATE documents
+                 SET status = 'extracting', error = NULL,
+                     extracted_text = CASE WHEN ? THEN extracted_text ELSE NULL END,
+                     extraction_fingerprint = ?, extraction_complete = 0
+                 WHERE id = ?`,
+              )
+              .run(cacheCompatible ? 1 : 0, expectedFingerprint, run.document_id);
+          })();
+          try {
+            const result = await extractDocument(
+              run.document_name,
+              run.document_mime_type,
+              run.document_original,
+              {
+                signal: extractionController.signal,
+                cachedPages,
+                pageConcurrency: 4,
+                renderConcurrency: 8,
+                pageTimeoutMs: 120_000,
+                pageRetries: 1,
+                onPageCompleted: (page) => {
+                  const timestamp = now();
+                  upsertPage.run(
+                    nanoid(),
+                    run.document_id,
+                    page.page,
+                    page.total,
+                    page.unit,
+                    page.content,
+                    page.error,
+                    timestamp,
+                    timestamp,
+                  );
+                },
+                onProgress: (message, data) => {
+                  const hasError =
+                    typeof data === "object" &&
+                    data !== null &&
+                    "error" in data &&
+                    Boolean(data.error);
+                  for (const [consumerRunId, consumerStageId] of consumers) {
+                    event(
+                      consumerRunId,
+                      "document_extraction_progress",
+                      message,
+                      data,
+                      hasError ? "warning" : "info",
+                      consumerStageId,
+                    );
+                  }
+                },
+              },
+            );
+            const insert = sqlite.prepare(
+              `INSERT INTO document_chunks(
+                 id, document_id, position, locator, content, sha256
+               ) VALUES (?, ?, ?, ?, ?, ?)`,
+            );
+            sqlite.transaction(() => {
+              if (result.degraded.length > 0) {
+                const timestamp = now();
+                upsertPage.run(
+                  nanoid(),
+                  run.document_id,
+                  0,
+                  0,
+                  "Dokument",
+                  result.degraded.join("\n"),
+                  result.degraded.join("; "),
+                  timestamp,
+                  timestamp,
+                );
+              } else {
+                sqlite
+                  .prepare(
+                    "DELETE FROM document_extraction_pages WHERE document_id = ? AND page = 0",
+                  )
+                  .run(run.document_id);
+              }
+              sqlite
+                .prepare("DELETE FROM document_chunks WHERE document_id = ?")
+                .run(run.document_id);
+              for (const chunk of result.chunks) {
+                insert.run(
+                  chunk.id,
+                  run.document_id,
+                  chunk.position,
+                  chunk.locator,
+                  chunk.content,
+                  chunk.sha256,
+                );
+              }
+              sqlite
+                .prepare(
+                  `UPDATE documents
+                   SET extracted_text = ?, extraction_fingerprint = ?,
+                       extraction_complete = 1, status = 'ready', error = NULL
+                   WHERE id = ?`,
+                )
+                .run(result.text, expectedFingerprint, run.document_id);
+            })();
+            return result;
+          } catch (error) {
+            const cancelled = extractionController.signal.aborted;
+            sqlite
+              .prepare("UPDATE documents SET status = ?, error = ? WHERE id = ?")
+              .run(
+                cancelled ? "uploaded" : "failed",
+                cancelled ? null : error instanceof Error ? error.message : String(error),
+                run.document_id,
+              );
+            throw error;
+          }
+        })().finally(() => {
+          if (activeDocumentExtractions.get(run.document_id)?.promise === promise) {
+            activeDocumentExtractions.delete(run.document_id);
+          }
+        });
+        active = { controller: extractionController, consumers, promise };
+        activeDocumentExtractions.set(run.document_id, active);
+      } else {
+        active.consumers.set(run.id, stageId);
+        event(
+          run.id,
+          "document_extraction_started",
+          "Lauf wartet auf die bereits aktive Extraktion derselben Datei",
+          { documentId: run.document_id },
+          "info",
+          stageId,
+        );
+      }
+      try {
+        extracted = await waitForExtraction(active.promise, signal);
+      } finally {
+        active.consumers.delete(run.id);
+        if (signal.aborted && active.consumers.size === 0) active.controller.abort(signal.reason);
+      }
+    }
+
+    signal.throwIfAborted();
+    run.extracted_text = extracted.text;
+    run.document_status = "ready";
+    const chunkCount = reused ? existingChunks.count : extracted.chunks.length;
+    const summary = reused
+      ? `Vorhandene Extraktion mit ${chunkCount} Belegabschnitten wiederverwendet.`
+      : `Originaldatei extrahiert und in ${chunkCount} Belegabschnitte gegliedert.`;
+    sqlite
+      .prepare(
+        `UPDATE run_stages
+         SET status = 'completed', output_text = ?, completed_at = ?
+         WHERE id = ?`,
+      )
+      .run(summary, now(), stageId);
+    artifact(run.id, stageId, "document-extraction", stageName, summary, {
+      reused,
+      chunks: chunkCount,
+      documentId: run.document_id,
+    });
+    event(
+      run.id,
+      "stage_completed",
+      `${stageName} abgeschlossen`,
+      { reused, chunks: chunkCount },
+      "info",
+      stageId,
+    );
+  } catch (error) {
+    const cancelled = signal.aborted;
+    sqlite
+      .prepare("UPDATE run_stages SET status = ?, completed_at = ? WHERE id = ?")
+      .run(cancelled ? "cancelled" : "failed", now(), stageId);
+    throw error;
+  }
+}
+
 function documentContext(run: RunRow) {
   const chunks = sqlite
     .prepare(
@@ -439,7 +789,9 @@ async function executeRun(runId: string) {
   activeRuns.add(runId);
   const run = sqlite
     .prepare(
-      `SELECT r.*, d.name AS document_name, d.extracted_text
+      `SELECT r.*, d.name AS document_name, d.extracted_text,
+              d.status AS document_status, d.mime_type AS document_mime_type,
+              d.original AS document_original
        FROM runs r JOIN documents d ON d.id = r.document_id WHERE r.id = ?`,
     )
     .get(runId) as RunRow | undefined;
@@ -457,6 +809,8 @@ async function executeRun(runId: string) {
       model: run.model,
       requestedMode: run.mode,
     });
+    await ensureDocumentExtraction(run, controller.signal);
+    controller.signal.throwIfAborted();
     const context = documentContext(run);
     artifact(runId, null, "coverage-manifest", "Dokument-Coverage-Manifest", context.manifest, {
       chunks: context.chunks.length,
@@ -1454,8 +1808,12 @@ export function cancelRun(runId: string) {
 
 export function recoverInterruptedRuns() {
   const interrupted = sqlite
-    .prepare("SELECT id FROM runs WHERE status = 'running'")
-    .all() as Array<{ id: string }>;
+    .prepare("SELECT id, current_stage FROM runs WHERE status = 'running'")
+    .all() as Array<{ id: string; current_stage: string | null }>;
+  const resumableExtractions = interrupted.filter(
+    (run) => run.current_stage === "Dokumentextraktion",
+  );
+  const failedInterrupted = interrupted.filter((run) => run.current_stage !== "Dokumentextraktion");
   const queued = sqlite.prepare("SELECT id FROM runs WHERE status = 'queued'").all() as Array<{
     id: string;
   }>;
@@ -1464,7 +1822,27 @@ export function recoverInterruptedRuns() {
     .all() as Array<{ id: string }>;
   const recoveredAt = now();
   const transaction = sqlite.transaction(() => {
-    for (const run of interrupted) {
+    for (const run of resumableExtractions) {
+      sqlite
+        .prepare(
+          "UPDATE run_stages SET status = 'cancelled', completed_at = ? WHERE run_id = ? AND status = 'running'",
+        )
+        .run(recoveredAt, run.id);
+      sqlite
+        .prepare(
+          `UPDATE runs SET status = 'queued', progress = 0,
+           current_stage = 'Dokumentextraktion wird fortgesetzt',
+           error = NULL, completed_at = NULL WHERE id = ?`,
+        )
+        .run(run.id);
+      event(
+        run.id,
+        "document_extraction_resumed",
+        "Unterbrochene Dokumentextraktion wird aus gespeicherten Seiten fortgesetzt",
+        { recoveredAt },
+      );
+    }
+    for (const run of failedInterrupted) {
       sqlite
         .prepare(
           "UPDATE run_stages SET status = 'failed', completed_at = ? WHERE run_id = ? AND status = 'running'",
@@ -1503,11 +1881,12 @@ export function recoverInterruptedRuns() {
     }
   });
   transaction();
-  for (const run of queued) enqueueRun(run.id);
+  for (const run of [...queued, ...resumableExtractions]) enqueueRun(run.id);
   return {
-    interrupted: interrupted.length,
+    interrupted: failedInterrupted.length,
+    resumedExtractions: resumableExtractions.length,
     cancelled: cancelling.length,
-    resumedQueued: queued.length,
+    resumedQueued: queued.length + resumableExtractions.length,
   };
 }
 

@@ -33,7 +33,6 @@ import {
   getLatestDerivedAnalysis,
   startDerivedAnalysis,
 } from "./derived-analysis.js";
-import { extractDocument } from "./extract.js";
 import {
   cancelRun,
   enqueueRun,
@@ -132,10 +131,32 @@ app.post("/api/documents", async (request, reply) => {
     )
     .get(hash) as Record<string, unknown> | undefined;
   if (existing) {
-    if (existing.deleted_at) {
+    if (existing.status !== "extracting") {
+      sqlite
+        .prepare(
+          `UPDATE documents
+           SET name = ?, mime_type = ?, size = ?, original = ?, status = 'uploaded',
+               error = NULL, deleted_at = NULL, created_at = ?
+           WHERE id = ?`,
+        )
+        .run(
+          upload.filename,
+          upload.mimetype,
+          buffer.length,
+          buffer,
+          new Date().toISOString(),
+          existing.id,
+        );
+    } else if (existing.deleted_at) {
       sqlite.prepare("UPDATE documents SET deleted_at = NULL WHERE id = ?").run(existing.id);
     }
-    return reply.code(200).send(documentDto(existing));
+    const row = sqlite
+      .prepare(
+        `SELECT id, name, mime_type, size, sha256, status, error, created_at
+         FROM documents WHERE id = ?`,
+      )
+      .get(existing.id) as Record<string, unknown>;
+    return reply.code(200).send(documentDto(row));
   }
 
   const id = nanoid();
@@ -143,29 +164,9 @@ app.post("/api/documents", async (request, reply) => {
   sqlite
     .prepare(
       `INSERT INTO documents(id, name, mime_type, size, sha256, original, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'extracting', ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, 'uploaded', ?)`,
     )
     .run(id, upload.filename, upload.mimetype, buffer.length, hash, buffer, createdAt);
-  try {
-    const extracted = await extractDocument(upload.filename, upload.mimetype, buffer);
-    const insert = sqlite.prepare(
-      "INSERT INTO document_chunks(id, document_id, position, locator, content, sha256) VALUES (?, ?, ?, ?, ?, ?)",
-    );
-    const transaction = sqlite.transaction(() => {
-      for (const chunk of extracted.chunks) {
-        insert.run(chunk.id, id, chunk.position, chunk.locator, chunk.content, chunk.sha256);
-      }
-      sqlite
-        .prepare("UPDATE documents SET extracted_text = ?, status = 'ready' WHERE id = ?")
-        .run(extracted.text, id);
-    });
-    transaction();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    sqlite
-      .prepare("UPDATE documents SET status = 'failed', error = ? WHERE id = ?")
-      .run(message, id);
-  }
   const row = sqlite
     .prepare(
       "SELECT id, name, mime_type, size, sha256, status, error, created_at FROM documents WHERE id = ?",
@@ -240,8 +241,6 @@ app.post("/api/runs", async (request, reply) => {
     .prepare("SELECT status FROM documents WHERE id = ? AND deleted_at IS NULL")
     .get(parsed.data.documentId) as { status: string } | undefined;
   if (!document) return reply.code(404).send({ error: "Dokument nicht gefunden." });
-  if (document.status !== "ready")
-    return reply.code(409).send({ error: "Dokument ist noch nicht bereit." });
   if (parsed.data.imageProvider) {
     const comfyui = getComfyUiConfig();
     const expectedImageProvider =
@@ -356,9 +355,6 @@ app.post("/api/comparisons", async (request, reply) => {
     .prepare("SELECT status FROM documents WHERE id = ? AND deleted_at IS NULL")
     .get(parsed.data.documentId) as { status: string } | undefined;
   if (!document) return reply.code(404).send({ error: "Dokument nicht gefunden." });
-  if (document.status !== "ready") {
-    return reply.code(409).send({ error: "Dokument ist noch nicht bereit." });
-  }
 
   const configuredProviders = settingsDto().providers;
   const checks = await Promise.all(

@@ -44,18 +44,26 @@ docs/                      Projektdokumentation
 
 1. Der Browser lädt eine Datei als Multipart-Upload hoch.
 2. Die API berechnet den SHA-256-Hash und verhindert doppelte Speicherung identischer Dateien.
-3. Das Original wird als BLOB in SQLite gespeichert.
-4. Textformate werden direkt normalisiert; Binärformate gehen an Tika.
-5. Der extrahierte Text wird vollständig in Chunks mit Position, Locator und Hash zerlegt.
-6. Ein Lauf referenziert Dokument, Provider, Modell, Council-Modus, Fokus und gewünschte erste Darstellung.
-7. Der Orchestrator erzeugt Stufen, Events und virtuelle Artefakte.
-8. Nach der Synthese wird das kanonische finale Markdown gespeichert.
-9. Eine eigene, live sichtbare Pi-Stufe lädt den Report-Designer-Skill und erzeugt aus dem fachlich abgeschlossenen Ergebnis direkt ein HTML-Package mit mehrseitiger Tageszeitung, diagrammreichem Visual Report und Bildbriefing. Sie verwendet keinen Markdown-zu-HTML-Konverter.
-10. Nach der fertigen Report-Antwort prüft der Server einmalig Transportstruktur, HTML-Verschachtelung, erforderliche Seiten und Hooks, das bekannte CSS-Klassenvokabular sowie verbotene JavaScript-Elemente und Attribute. Bei Befunden erhält derselbe Report-Agent den vollständigen Fehlerbericht und genau eine Korrekturrunde; anschließend folgt eine statische Nachprüfung.
-11. Bei Codex und visionfähigen OpenRouter-Modellen rendert Chromium beide HTML-Ausgaben einmal als Screenshot. Eine sichtbare Vision-Stufe darf Hierarchie und Layout daraufhin einmal verbessern; eine weitere statische Vertragsprüfung entscheidet, ob die Revision übernommen wird. Lokale Modelle überspringen diesen Schritt.
-12. Beide Designausgaben werden für jeden Lauf gespeichert. Die Textdarstellung rendert separat das kanonische Markdown.
-13. Jeder neue Lauf kann ein dokumentbezogenes Editorialmotiv erzeugen: Codex über die native OpenAI-Bild-API, OpenRouter nativ bei bildfähigem Modell und sonst optional über ComfyUI, die AI Box optional über ComfyUI. Tageszeitung, Visual Report und PDF desselben Laufs verwenden gemeinsam dieses eine Motiv.
-14. Ein Vergleich legt einen eigenen `comparisons`-Datensatz an und startet je erreichbarer Provider-/Modellwahl einen normalen, aber mit `comparison_id` isolierten Council-Lauf. `/api/runs` liefert diese Läufe bewusst nicht aus; sie werden ausschließlich über die Vergleichs-API und den Testmodus angezeigt.
+3. Das Original wird als BLOB mit dem Status `uploaded` in SQLite gespeichert. Beim Upload findet
+   noch keine Extraktion statt.
+4. Erst ein gestarteter Lauf eröffnet die sichtbare Stufe **Dokumentextraktion**. Textformate werden
+   direkt normalisiert; Word wird nativ mit Tika strukturiert und einmalig in PDF umgewandelt.
+5. Seitentext und JPEG-Rendering laufen als systemweit begrenzte Parallelpipeline. Maximal vier
+   Codex-Seitenbeschreibungen laufen gleichzeitig; jede fertige Seite wird sofort in SQLite
+   gesichert und nach Timeout einmal wiederholt.
+6. Vollständige Extraktionen und erfolgreiche Seiten-Checkpoints werden über Dokument-Hash,
+   Dateityp, Pipelineversion, Renderer-/Promptversion und Codex-Modell gecacht. Unterbrochene
+   Extraktionsläufe werden nach einem Neustart aus den Checkpoints fortgesetzt.
+7. Der extrahierte Text wird vollständig in Chunks mit Position, Locator und Hash zerlegt.
+8. Ein Lauf referenziert Dokument, Provider, Modell, Council-Modus, Fokus und gewünschte erste Darstellung.
+9. Der Orchestrator erzeugt Stufen, Events und virtuelle Artefakte.
+10. Nach der Synthese wird das kanonische finale Markdown gespeichert.
+11. Eine eigene, live sichtbare Pi-Stufe lädt den Report-Designer-Skill und erzeugt aus dem fachlich abgeschlossenen Ergebnis direkt ein HTML-Package mit mehrseitiger Tageszeitung, diagrammreichem Visual Report und Bildbriefing. Sie verwendet keinen Markdown-zu-HTML-Konverter.
+12. Nach der fertigen Report-Antwort prüft der Server einmalig Transportstruktur, HTML-Verschachtelung, erforderliche Seiten und Hooks, das bekannte CSS-Klassenvokabular sowie verbotene JavaScript-Elemente und Attribute. Bei Befunden erhält derselbe Report-Agent den vollständigen Fehlerbericht und genau eine Korrekturrunde; anschließend folgt eine statische Nachprüfung.
+13. Bei Codex und visionfähigen OpenRouter-Modellen rendert Chromium beide HTML-Ausgaben einmal als Screenshot. Eine sichtbare Vision-Stufe darf Hierarchie und Layout daraufhin einmal verbessern; eine weitere statische Vertragsprüfung entscheidet, ob die Revision übernommen wird. Lokale Modelle überspringen diesen Schritt.
+14. Beide Designausgaben werden für jeden Lauf gespeichert. Die Textdarstellung rendert separat das kanonische Markdown.
+15. Jeder neue Lauf kann ein dokumentbezogenes Editorialmotiv erzeugen: Codex über die native OpenAI-Bild-API, OpenRouter nativ bei bildfähigem Modell und sonst optional über ComfyUI, die AI Box optional über ComfyUI. Tageszeitung, Visual Report und PDF desselben Laufs verwenden gemeinsam dieses eine Motiv.
+16. Ein Vergleich legt einen eigenen `comparisons`-Datensatz an und startet je erreichbarer Provider-/Modellwahl einen normalen, aber mit `comparison_id` isolierten Council-Lauf. `/api/runs` liefert diese Läufe bewusst nicht aus; sie werden ausschließlich über die Vergleichs-API und den Testmodus angezeigt.
 
 ## Datenbank
 

@@ -8,6 +8,8 @@ export const documents = sqliteTable("documents", {
   sha256: text("sha256").notNull(),
   original: blob("original", { mode: "buffer" }).notNull(),
   extractedText: text("extracted_text"),
+  extractionFingerprint: text("extraction_fingerprint"),
+  extractionComplete: integer("extraction_complete").notNull().default(0),
   status: text("status").notNull(),
   error: text("error"),
   createdAt: text("created_at").notNull(),

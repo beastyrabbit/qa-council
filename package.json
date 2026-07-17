@@ -1,6 +1,6 @@
 {
   "name": "qa-council",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Auditable multi-role QA reviews with Pi",
   "main": "dist/server/index.js",
   "scripts": {

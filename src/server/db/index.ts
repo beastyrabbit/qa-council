@@ -15,6 +15,7 @@ sqlite.exec(`
 CREATE TABLE IF NOT EXISTS documents (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, mime_type TEXT NOT NULL, size INTEGER NOT NULL,
   sha256 TEXT NOT NULL, original BLOB NOT NULL, extracted_text TEXT, status TEXT NOT NULL,
+  extraction_complete INTEGER NOT NULL DEFAULT 0,
   error TEXT, created_at TEXT NOT NULL, deleted_at TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS documents_sha256_idx ON documents(sha256);
@@ -23,6 +24,14 @@ CREATE TABLE IF NOT EXISTS document_chunks (
   position INTEGER NOT NULL, locator TEXT NOT NULL, content TEXT NOT NULL, sha256 TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS chunks_document_idx ON document_chunks(document_id, position);
+CREATE TABLE IF NOT EXISTS document_extraction_pages (
+  id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  page INTEGER NOT NULL, total_pages INTEGER NOT NULL, unit TEXT NOT NULL,
+  content TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(document_id, page)
+);
+CREATE INDEX IF NOT EXISTS extraction_pages_document_idx
+  ON document_extraction_pages(document_id, page);
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
   provider TEXT NOT NULL, model TEXT NOT NULL, mode TEXT NOT NULL, resolved_mode TEXT,
@@ -92,6 +101,8 @@ function addColumnIfMissing(table: string, column: string, definition: string) {
 
 addColumnIfMissing("runs", "archived_at", "TEXT");
 addColumnIfMissing("documents", "deleted_at", "TEXT");
+addColumnIfMissing("documents", "extraction_fingerprint", "TEXT");
+addColumnIfMissing("documents", "extraction_complete", "INTEGER NOT NULL DEFAULT 0");
 addColumnIfMissing("runs", "image_provider", "TEXT");
 addColumnIfMissing("runs", "comparison_id", "TEXT");
 addColumnIfMissing("presentations", "pages_json", "TEXT NOT NULL DEFAULT '[]'");
@@ -102,6 +113,13 @@ sqlite.exec("CREATE INDEX IF NOT EXISTS runs_comparison_idx ON runs(comparison_i
 sqlite.exec(
   "CREATE INDEX IF NOT EXISTS generated_images_run_slot_idx ON generated_images(run_id, slot, created_at)",
 );
+sqlite
+  .prepare(
+    `UPDATE documents
+     SET status = 'uploaded', error = NULL
+     WHERE status = 'extracting'`,
+  )
+  .run();
 
 const now = new Date().toISOString();
 const insertProvider = sqlite.prepare(`
