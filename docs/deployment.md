@@ -32,7 +32,7 @@ Der Workflow `.forgejo/workflows/ci.yaml` besitzt zwei Jobs:
 - persönlicher Forgejo-Runner
 - gemeinsamer entfernter BuildKit unter `tcp://buildkitd.forgejo-runners.svc.cluster.local:1234`
 - zentraler Registry-Login über `beasty/forgejo-ci/actions/registry-login@main`
-- Image-Tags `main`, Git-Tag und Commit-SHA
+- Image-Tags `main`, SemVer ohne `v` (zum Beispiel `0.1.0` und `0.1`) sowie Commit-SHA
 - Pull Requests bauen, veröffentlichen aber kein Image
 
 Der Registry-Token wird nicht im Projekt gespeichert. Der zentrale Login bezieht ihn zur Laufzeit über die bestehende Forgejo-OIDC-/Infisical-Kette.
@@ -109,8 +109,9 @@ lefthook run pre-commit
 
 1. Anwendungsrepository nach Forgejo pushen.
 2. Erfolgreichen Quality- und Container-Job abwarten.
-3. Prüfen, dass `git.heerlab.com/beasty/qa-council:main` verfügbar ist.
-4. GitOps-Commits pushen.
+3. Einen Git-Tag und Forgejo-Release wie `v0.1.0` erstellen und prüfen, dass
+   `git.heerlab.com/beasty/qa-council:0.1.0` verfügbar ist.
+4. Den unveränderlichen SemVer-Tag im HelmRelease eintragen und den GitOps-Commit pushen.
 5. Flux synchronisieren:
 
 ```bash
@@ -132,6 +133,6 @@ curl -fsS https://qa-council.skyway.tools/api/health
 
 ## Rollback
 
-- Anwendung: HelmRelease auf einen vorhandenen unveränderlichen Commit-SHA-Tag setzen.
+- Anwendung: HelmRelease auf einen vorhandenen unveränderlichen SemVer- oder Commit-SHA-Tag setzen.
 - GitOps: fehlerhaften Commit mit `git revert` zurücknehmen und Flux erneut reconciliieren.
 - Daten: Longhorn-/Velero-Snapshot des PVC wiederherstellen. Datenbank und `settings.key` müssen aus demselben Sicherungsstand stammen.
