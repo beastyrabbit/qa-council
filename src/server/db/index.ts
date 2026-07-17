@@ -15,7 +15,7 @@ sqlite.exec(`
 CREATE TABLE IF NOT EXISTS documents (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, mime_type TEXT NOT NULL, size INTEGER NOT NULL,
   sha256 TEXT NOT NULL, original BLOB NOT NULL, extracted_text TEXT, status TEXT NOT NULL,
-  error TEXT, created_at TEXT NOT NULL
+  error TEXT, created_at TEXT NOT NULL, deleted_at TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS documents_sha256_idx ON documents(sha256);
 CREATE TABLE IF NOT EXISTS document_chunks (
@@ -63,10 +63,19 @@ CREATE TABLE IF NOT EXISTS presentations (
 );
 CREATE TABLE IF NOT EXISTS generated_images (
   id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-  provider TEXT NOT NULL, prompt TEXT NOT NULL, remote_prompt_id TEXT,
+  provider TEXT NOT NULL, prompt TEXT NOT NULL, remote_prompt_id TEXT, slot TEXT NOT NULL DEFAULT 'hero',
   mime_type TEXT NOT NULL, data BLOB NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS generated_images_run_idx ON generated_images(run_id, created_at);
+CREATE TABLE IF NOT EXISTS derived_analyses (
+  id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL, status TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
+  source_artifact_id TEXT NOT NULL, source_refs_json TEXT NOT NULL DEFAULT '[]',
+  thinking_text TEXT NOT NULL DEFAULT '', output_text TEXT NOT NULL DEFAULT '',
+  error TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS derived_analyses_run_idx
+  ON derived_analyses(run_id, kind, created_at);
 CREATE TABLE IF NOT EXISTS provider_settings (
   provider TEXT PRIMARY KEY, model TEXT NOT NULL, base_url TEXT, encrypted_api_key TEXT,
   updated_at TEXT NOT NULL
@@ -82,12 +91,17 @@ function addColumnIfMissing(table: string, column: string, definition: string) {
 }
 
 addColumnIfMissing("runs", "archived_at", "TEXT");
+addColumnIfMissing("documents", "deleted_at", "TEXT");
 addColumnIfMissing("runs", "image_provider", "TEXT");
 addColumnIfMissing("runs", "comparison_id", "TEXT");
 addColumnIfMissing("presentations", "pages_json", "TEXT NOT NULL DEFAULT '[]'");
 addColumnIfMissing("run_stages", "thinking_text", "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing("run_stages", "output_text", "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing("generated_images", "slot", "TEXT NOT NULL DEFAULT 'hero'");
 sqlite.exec("CREATE INDEX IF NOT EXISTS runs_comparison_idx ON runs(comparison_id, created_at)");
+sqlite.exec(
+  "CREATE INDEX IF NOT EXISTS generated_images_run_slot_idx ON generated_images(run_id, slot, created_at)",
+);
 
 const now = new Date().toISOString();
 const insertProvider = sqlite.prepare(`

@@ -11,6 +11,7 @@ export const documents = sqliteTable("documents", {
   status: text("status").notNull(),
   error: text("error"),
   createdAt: text("created_at").notNull(),
+  deletedAt: text("deleted_at"),
 });
 
 export const documentChunks = sqliteTable("document_chunks", {
@@ -118,9 +119,27 @@ export const generatedImages = sqliteTable("generated_images", {
   provider: text("provider").notNull(),
   prompt: text("prompt").notNull(),
   remotePromptId: text("remote_prompt_id"),
+  slot: text("slot").notNull().default("hero"),
   mimeType: text("mime_type").notNull(),
   data: blob("data", { mode: "buffer" }).notNull(),
   createdAt: text("created_at").notNull(),
+});
+
+export const derivedAnalyses = sqliteTable("derived_analyses", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull(),
+  kind: text("kind").notNull(),
+  status: text("status").notNull(),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  sourceArtifactId: text("source_artifact_id").notNull(),
+  sourceRefsJson: text("source_refs_json").notNull().default("[]"),
+  thinkingText: text("thinking_text").notNull().default(""),
+  outputText: text("output_text").notNull().default(""),
+  error: text("error"),
+  createdAt: text("created_at").notNull(),
+  startedAt: text("started_at"),
+  completedAt: text("completed_at"),
 });
 
 export const providerSettings = sqliteTable("provider_settings", {

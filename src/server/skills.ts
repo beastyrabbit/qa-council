@@ -33,7 +33,7 @@ const candidates = [
 
 export const REPORT_DESIGN_SKILL_FILE = "report-designer/SKILL.md";
 export const EXPECTED_REPORT_DESIGN_SKILL_HASH =
-  "a2aa4f50ea94700fa4fa05961a4eea4bc1d3e2acbdd97648338b34ef8eda5a80";
+  "d06320b0f465f05cee53983d98a652a02f17afb415b9b2d9482fee610d493474";
 
 const reportSkillCandidates = [
   path.resolve("resources/skills"),

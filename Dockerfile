@@ -20,7 +20,7 @@ ENV DATA_DIR=/data
 ENV CHROMIUM_PATH=/usr/bin/chromium
 WORKDIR /app
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends chromium \
+  && apt-get install -y --no-install-recommends chromium libreoffice-impress poppler-utils \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/package.json /app/pnpm-lock.yaml ./
 COPY --from=build /app/node_modules ./node_modules

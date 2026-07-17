@@ -30,6 +30,7 @@ function imageData(value: string, provider: string) {
 
 function storeImage(options: {
   runId: string;
+  slot: string;
   provider: "openai" | "openrouter";
   prompt: string;
   mimeType: string;
@@ -39,8 +40,9 @@ function storeImage(options: {
   const id = nanoid();
   sqlite
     .prepare(
-      `INSERT INTO generated_images(id, run_id, provider, prompt, remote_prompt_id, mime_type, data, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO generated_images(
+        id, run_id, provider, prompt, remote_prompt_id, slot, mime_type, data, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -48,6 +50,7 @@ function storeImage(options: {
       options.provider,
       options.prompt,
       options.remotePromptId ?? null,
+      options.slot,
       options.mimeType,
       options.data,
       new Date().toISOString(),
@@ -57,6 +60,7 @@ function storeImage(options: {
 
 async function generateOpenAiImage(options: {
   runId: string;
+  slot: string;
   prompt: string;
   signal?: AbortSignal;
   onEvent?: (event: ImageEvent) => void;
@@ -100,6 +104,7 @@ async function generateOpenAiImage(options: {
   const data = imageData(body.data[0].b64_json, "OpenAI");
   const id = storeImage({
     runId: options.runId,
+    slot: options.slot,
     provider: "openai",
     prompt: options.prompt,
     mimeType: "image/png",
@@ -115,6 +120,7 @@ async function generateOpenAiImage(options: {
 
 async function generateOpenRouterImage(options: {
   runId: string;
+  slot: string;
   model: string;
   prompt: string;
   signal?: AbortSignal;
@@ -149,6 +155,7 @@ async function generateOpenRouterImage(options: {
   const data = imageData(image.data, "OpenRouter");
   const id = storeImage({
     runId: options.runId,
+    slot: options.slot,
     provider: "openrouter",
     prompt: options.prompt,
     mimeType: image.mimeType,
@@ -165,6 +172,7 @@ async function generateOpenRouterImage(options: {
 
 export async function getOrCreateRunImage(options: {
   runId: string;
+  slot?: string;
   provider: ProviderId;
   model: string;
   imageProvider: ImageProvider;
@@ -173,16 +181,17 @@ export async function getOrCreateRunImage(options: {
   signal?: AbortSignal;
   onEvent?: (event: ImageEvent) => void;
 }) {
+  const slot = options.slot ?? "hero";
   const existing = sqlite
     .prepare(
-      "SELECT id, provider FROM generated_images WHERE run_id = ? ORDER BY created_at LIMIT 1",
+      "SELECT id, provider FROM generated_images WHERE run_id = ? AND slot = ? ORDER BY created_at LIMIT 1",
     )
-    .get(options.runId) as { id: string; provider: string } | undefined;
+    .get(options.runId, slot) as { id: string; provider: string } | undefined;
   if (existing) {
     options.onEvent?.({
       type: "image_generation_reused",
-      message: "Das Editorialmotiv dieses Laufs wird für die zweite Ausgabe wiederverwendet",
-      data: { imageId: existing.id, provider: existing.provider },
+      message: `Das Bild für den Slot „${slot}“ wird wiederverwendet`,
+      data: { imageId: existing.id, provider: existing.provider, slot },
     });
     return existing.id;
   }
@@ -191,6 +200,7 @@ export async function getOrCreateRunImage(options: {
   if (options.imageProvider === "openai") {
     return generateOpenAiImage({
       runId: options.runId,
+      slot,
       prompt,
       signal: options.signal,
       onEvent: options.onEvent,
@@ -200,6 +210,7 @@ export async function getOrCreateRunImage(options: {
     try {
       const nativeImage = await generateOpenRouterImage({
         runId: options.runId,
+        slot,
         model: options.model,
         prompt,
         signal: options.signal,
@@ -226,6 +237,7 @@ export async function getOrCreateRunImage(options: {
   }
   return getOrCreateEditorialImage({
     runId: options.runId,
+    slot,
     documentName: options.documentName,
     summary: options.summary,
     signal: options.signal,

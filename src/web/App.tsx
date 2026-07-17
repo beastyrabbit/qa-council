@@ -10,6 +10,7 @@ import {
   FileText,
   FlaskConical,
   FolderOpen,
+  ListChecks,
   LoaderCircle,
   LogIn,
   Menu,
@@ -37,11 +38,13 @@ import type {
   AppSettings,
   ComparisonRecord,
   CouncilMode,
+  DerivedAnalysisRecord,
   DocumentDetails,
   DocumentRecord,
   PresentationKind,
   ProviderId,
   ProviderModel,
+  ReviewRecord,
   RunDetails,
   RunRecord,
 } from "../shared/types";
@@ -162,6 +165,10 @@ function SanitizedMarkdown({ html }: { html: string }) {
   );
 }
 
+function VersionFooter() {
+  return <footer className="app-version">Version: {__APP_VERSION__}</footer>;
+}
+
 const SYSTEM_EVENTS = new Set([
   "run_started",
   "council_composed",
@@ -172,11 +179,13 @@ const SYSTEM_EVENTS = new Set([
   "compaction_start",
   "compaction_end",
   "final_created",
-  "presentation_started",
-  "presentation_completed",
+  "result_published",
+  "report_workspace_scaffolded",
   "report_static_check_completed",
   "report_static_feedback_sent",
   "report_static_recheck_completed",
+  "presentation_started",
+  "presentation_completed",
   "image_generation_started",
   "image_generation_queued",
   "image_generation_reused",
@@ -336,13 +345,18 @@ function RunView({
               <Trash2 size={16} /> Löschen
             </button>
           )}
-          {details?.run.status === "completed" && details.presentations[0] && (
+          {details?.presentations[0] && (
             <button
               className="button button--primary"
               type="button"
-              onClick={() => onResult(details.presentations[0].id)}
+              onClick={() =>
+                onResult(
+                  details.presentations.find((item) => item.kind === "text")?.id ??
+                    details.presentations[0].id,
+                )
+              }
             >
-              Resultat öffnen
+              {details.run.status === "completed" ? "Resultat öffnen" : "Text-Ergebnis öffnen"}
             </button>
           )}
         </div>
@@ -534,7 +548,11 @@ function RunView({
                         <Copy size={14} />
                       </button>
                     </div>
-                    <pre>{item.content}</pre>
+                    {item.contentHtml ? (
+                      <SanitizedMarkdown html={item.contentHtml} />
+                    ) : (
+                      <pre>{item.content}</pre>
+                    )}
                   </details>
                 ))}
               </section>
@@ -645,6 +663,10 @@ function ResultView({
   const [runId, setRunId] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  const [section, setSection] = useState<"presentation" | "reviews" | "top10">("presentation");
+  const [reviews, setReviews] = useState<ReviewRecord[]>([]);
+  const [top10, setTop10] = useState<DerivedAnalysisRecord | null>(null);
+  const [startingTop10, setStartingTop10] = useState(false);
   const load = useCallback(
     async (preferredKind?: PresentationKind) => {
       const reference = await api<{
@@ -656,6 +678,12 @@ function ResultView({
       setDetails(value);
       setRunId(reference.runId);
       setKind(preferredKind ?? reference.kind);
+      const [reviewItems, latestTop10] = await Promise.all([
+        api<ReviewRecord[]>(`/api/runs/${reference.runId}/reviews`),
+        api<DerivedAnalysisRecord | null>(`/api/runs/${reference.runId}/derived-analyses/top10`),
+      ]);
+      setReviews(reviewItems);
+      setTop10(latestTop10);
     },
     [presentationId],
   );
@@ -663,19 +691,43 @@ function ResultView({
   useEffect(() => {
     void load().catch((reason) => setError(reason.message));
   }, [load]);
+  useEffect(() => {
+    if (
+      !details ||
+      (["completed", "failed", "cancelled"].includes(details.run.status) &&
+        top10?.status !== "running" &&
+        top10?.status !== "queued")
+    )
+      return;
+    const timer = window.setInterval(() => {
+      void load(kind).catch((reason) => setError(reason.message));
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [details, kind, load, top10?.status]);
   const presentation = details?.presentations.find((item) => item.kind === kind);
   const newspaperPage = pageSlug
     ? presentation?.pages.find((page) => page.slug === pageSlug)
     : undefined;
   const renderedHtml = pageSlug ? newspaperPage?.html : presentation?.html;
+  useEffect(() => {
+    if (section === "presentation" && presentation && presentation.id !== presentationId) {
+      onPresentationChange(presentation.id);
+    }
+  }, [onPresentationChange, presentation, presentationId, section]);
 
   async function selectPresentation(next: PresentationKind) {
+    setSection("presentation");
     setKind(next);
     const existing = details?.presentations.find((item) => item.kind === next);
     if (existing) {
       onPresentationChange(existing.id);
       return;
     }
+    const reportsAreBuilding =
+      details?.artifacts.some((item) => item.kind === "final") &&
+      details &&
+      !["completed", "failed", "cancelled"].includes(details.run.status);
+    if (reportsAreBuilding) return;
     setCreating(true);
     setError("");
     try {
@@ -689,6 +741,25 @@ function ResultView({
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function startTop10() {
+    if (!runId) return;
+    setStartingTop10(true);
+    setError("");
+    try {
+      const analysis = await api<DerivedAnalysisRecord>(`/api/runs/${runId}/derived-analyses`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "top10_next_steps" }),
+      });
+      setTop10(analysis);
+      setSection("top10");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setStartingTop10(false);
     }
   }
 
@@ -712,6 +783,15 @@ function ResultView({
         </div>
         <div className="result-toolbar__actions">
           <button
+            className="button button--primary"
+            type="button"
+            disabled={startingTop10}
+            onClick={() => void startTop10()}
+          >
+            <ListChecks size={16} />
+            {startingTop10 ? "Wird gestartet …" : "Top 10 nächste Schritte"}
+          </button>
+          <button
             className="button button--quiet"
             type="button"
             onClick={() => void navigator.clipboard.writeText(window.location.href)}
@@ -728,17 +808,100 @@ function ResultView({
           </a>
         </div>
       </div>
+      <nav className="result-subnav" aria-label="Ergebnisbereiche">
+        <button
+          className={section === "presentation" ? "active" : ""}
+          type="button"
+          onClick={() => setSection("presentation")}
+        >
+          Ergebnis
+        </button>
+        <button
+          className={section === "reviews" ? "active" : ""}
+          type="button"
+          onClick={() => setSection("reviews")}
+        >
+          Einzelreviews <span>{reviews.length}</span>
+        </button>
+        <button
+          className={section === "top10" ? "active" : ""}
+          type="button"
+          onClick={() => setSection("top10")}
+        >
+          Top 10
+        </button>
+      </nav>
       {error && <p className="notice notice--error">{error}</p>}
-      {pageSlug && presentation && !newspaperPage && (
+      {section === "presentation" && pageSlug && presentation && !newspaperPage && (
         <p className="notice notice--error">Diese Zeitungsseite wurde nicht gefunden.</p>
       )}
-      {creating && (
-        <div className="result-loading">
-          <LoaderCircle className="spin" /> Darstellung wird aus dem finalen Ergebnis erzeugt …
-        </div>
+      {section === "presentation" &&
+        (creating ||
+          (!presentation && details?.artifacts.some((item) => item.kind === "final"))) && (
+          <div className="result-loading">
+            <LoaderCircle className="spin" />{" "}
+            {creating
+              ? "Darstellung wird aus dem finalen Ergebnis erzeugt …"
+              : `${FORMAT_NAMES[kind]} wird im Hintergrund gestaltet und geprüft …`}
+          </div>
+        )}
+      {section === "presentation" && renderedHtml && (
+        <div
+          className="rendered-result"
+          data-presentation-id={presentation?.id}
+          dangerouslySetInnerHTML={{ __html: renderedHtml }}
+        />
       )}
-      {renderedHtml && (
-        <div className="rendered-result" dangerouslySetInnerHTML={{ __html: renderedHtml }} />
+      {section === "reviews" && (
+        <main className="result-support">
+          <header>
+            <span>PRÜFSPUREN</span>
+            <h1>Isolierte Einzelreviews</h1>
+            <p>Die unabhängigen Fachurteile, auf denen die finale Synthese aufbaut.</p>
+          </header>
+          <div className="result-review-list">
+            {reviews.map((review) => (
+              <details key={review.id}>
+                <summary>
+                  <span>{review.role}</span>
+                  <strong>{review.title}</strong>
+                  <code>{review.sha256.slice(0, 10)}</code>
+                </summary>
+                <SanitizedMarkdown html={review.contentHtml} />
+              </details>
+            ))}
+          </div>
+        </main>
+      )}
+      {section === "top10" && (
+        <main className="result-support result-support--top10">
+          <header>
+            <span>HANDLUNGSPLAN</span>
+            <h1>Top 10 nächste Schritte</h1>
+            <p>
+              Aus dem finalen Ergebnis abgeleitet und gegen die isolierten Einzelreviews geprüft.
+            </p>
+          </header>
+          {!top10 && (
+            <button
+              className="button button--primary"
+              type="button"
+              disabled={startingTop10}
+              onClick={() => void startTop10()}
+            >
+              <ListChecks size={16} /> Analyse starten
+            </button>
+          )}
+          {top10 && ["queued", "running"].includes(top10.status) && (
+            <div className="result-loading">
+              <LoaderCircle className="spin" /> Empfehlungen werden belegt und priorisiert …
+            </div>
+          )}
+          {top10?.status === "failed" && (
+            <p className="notice notice--error">{top10.error ?? "Analyse fehlgeschlagen."}</p>
+          )}
+          {top10?.outputHtml && <SanitizedMarkdown html={top10.outputHtml} />}
+        </main>
       )}
     </div>
   );
@@ -981,7 +1144,7 @@ function TestModeView({
         >
           <input
             type="file"
-            accept=".md,.txt,.pdf,.docx,.html,.htm"
+            accept=".md,.txt,.pdf,.doc,.docx,.odt,.rtf,.ppt,.pptx,.odp,.xls,.xlsx,.ods,.html,.htm"
             disabled={uploading}
             onChange={(event) => {
               void uploadTestFile(event.target.files?.[0]);
@@ -1795,45 +1958,57 @@ export function App() {
 
   if (resultId) {
     return (
-      <ResultView
-        presentationId={resultId}
-        pageSlug={resultPage}
-        onBack={closePage}
-        onPresentationChange={openResult}
-      />
+      <>
+        <ResultView
+          presentationId={resultId}
+          pageSlug={resultPage}
+          onBack={closePage}
+          onPresentationChange={openResult}
+        />
+        <VersionFooter />
+      </>
     );
   }
   if (documentId) {
     return (
-      <DocumentView
-        id={documentId}
-        onBack={closeDocument}
-        onReview={reviewDocument}
-        onRun={openRun}
-      />
+      <>
+        <DocumentView
+          id={documentId}
+          onBack={closeDocument}
+          onReview={reviewDocument}
+          onRun={openRun}
+        />
+        <VersionFooter />
+      </>
     );
   }
   if (detailId) {
     return (
-      <RunView
-        id={detailId}
-        onBack={comparisonId ? () => openComparison(comparisonId) : closePage}
-        onChanged={() => void load()}
-        onResult={openResult}
-        backLabel={comparisonId ? "Vergleich" : "Läufe"}
-      />
+      <>
+        <RunView
+          id={detailId}
+          onBack={comparisonId ? () => openComparison(comparisonId) : closePage}
+          onChanged={() => void load()}
+          onResult={openResult}
+          backLabel={comparisonId ? "Vergleich" : "Läufe"}
+        />
+        <VersionFooter />
+      </>
     );
   }
   if (comparisonId) {
     const comparison = comparisons.find((item) => item.id === comparisonId);
     if (comparison) {
       return (
-        <ComparisonView
-          comparison={comparison}
-          onBack={closeComparison}
-          onRun={openComparisonRun}
-          onResult={(runId) => void openRunResult(runId)}
-        />
+        <>
+          <ComparisonView
+            comparison={comparison}
+            onBack={closeComparison}
+            onRun={openComparisonRun}
+            onResult={(runId) => void openRunResult(runId)}
+          />
+          <VersionFooter />
+        </>
       );
     }
   }
@@ -2036,13 +2211,24 @@ export function App() {
                   <span>Ausgewähltes Dokument</span>
                   <strong>{selectedDocument?.name ?? "Noch kein Dokument ausgewählt"}</strong>
                 </div>
-                <button
-                  className="button button--quiet"
-                  type="button"
-                  onClick={() => setView("documents")}
-                >
-                  {selectedDocument ? "Ändern" : "Dokument wählen"}
-                </button>
+                <div className="selected-document__actions">
+                  <button
+                    className="button button--quiet"
+                    type="button"
+                    onClick={() => setView("documents")}
+                  >
+                    {selectedDocument ? "Ändern" : "Dokument wählen"}
+                  </button>
+                  {selectedDocument && (
+                    <button
+                      className="button button--quiet"
+                      type="button"
+                      onClick={() => setSelected("")}
+                    >
+                      Auswahl leeren
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="control-grid">
                 <label>
@@ -2319,6 +2505,7 @@ export function App() {
           </div>
         )}
       </main>
+      <VersionFooter />
     </div>
   );
 }

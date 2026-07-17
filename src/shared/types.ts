@@ -67,6 +67,7 @@ export interface ArtifactRecord {
   title: string;
   contentType: string;
   content: string;
+  contentHtml?: string;
   sha256: string;
   metadata?: unknown;
   createdAt: string;
@@ -111,6 +112,34 @@ export interface RunDetails {
   artifacts: ArtifactRecord[];
   presentations: PresentationRecord[];
   question?: { id: string; prompt: string } | null;
+}
+
+export interface ReviewRecord {
+  id: string;
+  role: string;
+  title: string;
+  sha256: string;
+  content: string;
+  contentHtml: string;
+  createdAt: string;
+}
+
+export interface DerivedAnalysisRecord {
+  id: string;
+  runId: string;
+  kind: "top10_next_steps";
+  status: "queued" | "running" | "ready" | "failed" | "cancelled";
+  provider: ProviderId;
+  model: string;
+  sourceArtifactId: string;
+  sourceRefs: Array<{ id: string; sha256: string; role?: string }>;
+  thinkingText: string;
+  outputText: string;
+  outputHtml: string;
+  error?: string | null;
+  createdAt: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
 }
 
 export interface ProviderModel {

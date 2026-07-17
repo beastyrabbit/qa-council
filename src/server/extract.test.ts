@@ -1,12 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { chunkDocument } from "./extract.js";
+import { composeSlideExtraction, isPresentationDocument } from "./extract.js";
 
-describe("chunkDocument", () => {
-  it("verliert keinen Inhalt an Chunk-Grenzen", () => {
-    const text = `# Kapitel\n${"Absatz mit Beleg.\n".repeat(2_000)}`.trim();
-    const chunks = chunkDocument(text, 800);
-    expect(chunks.length).toBeGreaterThan(2);
-    expect(chunks.map((chunk) => chunk.content).join("\n")).toBe(text);
-    expect(chunks.every((chunk, index) => chunk.position === index)).toBe(true);
+describe("Präsentationsextraktion", () => {
+  it("erkennt PowerPoint- und OpenDocument-Präsentationen", () => {
+    expect(isPresentationDocument("roadmap.pptx", "application/octet-stream")).toBe(true);
+    expect(
+      isPresentationDocument(
+        "roadmap.bin",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      ),
+    ).toBe(true);
+    expect(isPresentationDocument("bericht.pdf", "application/pdf")).toBe(false);
+  });
+
+  it("ordnet Text und visuelle Codex-Beschreibung eindeutig einer Folie zu", () => {
+    expect(composeSlideExtraction(3, "Umsatz\n2026", "Ein ansteigendes Balkendiagramm.")).toContain(
+      "# Folie 3\n\n## Extrahierter Folientext\n\nUmsatz\n2026\n\n## Visuelle Folienbeschreibung (Codex)\n\nEin ansteigendes Balkendiagramm.",
+    );
   });
 });

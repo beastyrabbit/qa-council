@@ -1,6 +1,6 @@
 {
   "name": "qa-council",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "Auditable multi-role QA reviews with Pi",
   "main": "dist/server/index.js",
   "scripts": {
@@ -31,6 +31,7 @@
     "@fastify/multipart": "^10.1.0",
     "@fastify/static": "^10.1.0",
     "better-sqlite3": "^12.11.1",
+    "css-tree": "^3.2.1",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.10.0",
     "lucide-react": "^1.24.0",
@@ -39,11 +40,13 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "sanitize-html": "^2.17.6",
+    "typescript-compiler": "npm:typescript@5.9.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.4",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/css-tree": "^2.3.11",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

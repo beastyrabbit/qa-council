@@ -382,21 +382,25 @@ async function generateComfyUiImage(options: {
 
 export async function getOrCreateEditorialImage(options: {
   runId: string;
+  slot?: string;
   documentName: string;
   summary: string;
   signal?: AbortSignal;
   onEvent?: (event: ComfyEvent) => void;
 }) {
+  const slot = options.slot ?? "hero";
   const existing = sqlite
     .prepare(
-      "SELECT id FROM generated_images WHERE run_id = ? AND provider = 'comfyui' ORDER BY created_at DESC LIMIT 1",
+      `SELECT id FROM generated_images
+       WHERE run_id = ? AND provider = 'comfyui' AND slot = ?
+       ORDER BY created_at DESC LIMIT 1`,
     )
-    .get(options.runId) as { id: string } | undefined;
+    .get(options.runId, slot) as { id: string } | undefined;
   if (existing) {
     options.onEvent?.({
       type: "image_generation_reused",
-      message: "Vorhandenes ComfyUI-Titelbild wird wiederverwendet",
-      data: { imageId: existing.id },
+      message: `Vorhandenes ComfyUI-Bild für „${slot}“ wird wiederverwendet`,
+      data: { imageId: existing.id, slot },
     });
     return existing.id;
   }
@@ -420,14 +424,16 @@ export async function getOrCreateEditorialImage(options: {
   const id = nanoid();
   sqlite
     .prepare(
-      `INSERT INTO generated_images(id, run_id, provider, prompt, remote_prompt_id, mime_type, data, created_at)
-       VALUES (?, ?, 'comfyui', ?, ?, ?, ?, ?)`,
+      `INSERT INTO generated_images(
+        id, run_id, provider, prompt, remote_prompt_id, slot, mime_type, data, created_at
+       ) VALUES (?, ?, 'comfyui', ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
       options.runId,
       prompt,
       generated.remotePromptId,
+      slot,
       generated.mimeType,
       generated.data,
       new Date().toISOString(),

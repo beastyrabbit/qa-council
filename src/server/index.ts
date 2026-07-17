@@ -27,6 +27,12 @@ import {
 } from "./comfyui.js";
 import { encryptSecret } from "./crypto.js";
 import { sqlite } from "./db/index.js";
+import {
+  cancelDerivedAnalysis,
+  getDerivedAnalysis,
+  getLatestDerivedAnalysis,
+  startDerivedAnalysis,
+} from "./derived-analysis.js";
 import { extractDocument } from "./extract.js";
 import {
   cancelRun,
@@ -106,7 +112,8 @@ app.get("/api/health", async () => ({ ok: true }));
 app.get("/api/documents", async () => {
   const rows = sqlite
     .prepare(
-      "SELECT id, name, mime_type, size, sha256, status, error, created_at FROM documents ORDER BY created_at DESC",
+      `SELECT id, name, mime_type, size, sha256, status, error, created_at
+       FROM documents WHERE deleted_at IS NULL ORDER BY created_at DESC`,
     )
     .all() as Array<Record<string, unknown>>;
   return rows.map(documentDto);
@@ -119,10 +126,16 @@ app.post("/api/documents", async (request, reply) => {
   const hash = sha256(buffer);
   const existing = sqlite
     .prepare(
-      "SELECT id, name, mime_type, size, sha256, status, error, created_at FROM documents WHERE sha256 = ?",
+      `SELECT id, name, mime_type, size, sha256, status, error, created_at, deleted_at
+       FROM documents WHERE sha256 = ?`,
     )
     .get(hash) as Record<string, unknown> | undefined;
-  if (existing) return reply.code(200).send(documentDto(existing));
+  if (existing) {
+    if (existing.deleted_at) {
+      sqlite.prepare("UPDATE documents SET deleted_at = NULL WHERE id = ?").run(existing.id);
+    }
+    return reply.code(200).send(documentDto(existing));
+  }
 
   const id = nanoid();
   const createdAt = new Date().toISOString();
@@ -165,7 +178,7 @@ app.get("/api/documents/:id", async (request, reply) => {
   const row = sqlite
     .prepare(
       `SELECT id, name, mime_type, size, sha256, status, error, extracted_text, created_at
-       FROM documents WHERE id = ?`,
+       FROM documents WHERE id = ? AND deleted_at IS NULL`,
     )
     .get(id) as Record<string, unknown> | undefined;
   return row
@@ -176,7 +189,7 @@ app.get("/api/documents/:id", async (request, reply) => {
 app.get("/api/documents/:id/download", async (request, reply) => {
   const { id } = request.params as { id: string };
   const row = sqlite
-    .prepare("SELECT name, mime_type, original FROM documents WHERE id = ?")
+    .prepare("SELECT name, mime_type, original FROM documents WHERE id = ? AND deleted_at IS NULL")
     .get(id) as { name: string; mime_type: string; original: Buffer } | undefined;
   if (!row) return reply.code(404).send({ error: "Dokument nicht gefunden." });
   const safeName = row.name.replace(/[\r\n"]/g, "_");
@@ -188,7 +201,9 @@ app.get("/api/documents/:id/download", async (request, reply) => {
 
 app.delete("/api/documents/:id", async (request, reply) => {
   const { id } = request.params as { id: string };
-  const result = sqlite.prepare("DELETE FROM documents WHERE id = ?").run(id);
+  const result = sqlite
+    .prepare("UPDATE documents SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL")
+    .run(new Date().toISOString(), id);
   return result.changes
     ? reply.code(204).send()
     : reply.code(404).send({ error: "Nicht gefunden." });
@@ -219,7 +234,7 @@ app.post("/api/runs", async (request, reply) => {
   const parsed = createRunSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues });
   const document = sqlite
-    .prepare("SELECT status FROM documents WHERE id = ?")
+    .prepare("SELECT status FROM documents WHERE id = ? AND deleted_at IS NULL")
     .get(parsed.data.documentId) as { status: string } | undefined;
   if (!document) return reply.code(404).send({ error: "Dokument nicht gefunden." });
   if (document.status !== "ready")
@@ -333,7 +348,7 @@ app.post("/api/comparisons", async (request, reply) => {
   const parsed = createComparisonSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues });
   const document = sqlite
-    .prepare("SELECT status FROM documents WHERE id = ?")
+    .prepare("SELECT status FROM documents WHERE id = ? AND deleted_at IS NULL")
     .get(parsed.data.documentId) as { status: string } | undefined;
   if (!document) return reply.code(404).send({ error: "Dokument nicht gefunden." });
   if (document.status !== "ready") {
@@ -500,6 +515,10 @@ app.get("/api/runs/:id", async (request, reply) => {
           title: String(row.title),
           contentType: String(row.content_type),
           content: String(row.content),
+          contentHtml:
+            String(row.content_type) === "text/markdown"
+              ? cachedMarkdownHtml(String(row.content))
+              : undefined,
           sha256: String(row.sha256),
           metadata: row.metadata ? JSON.parse(String(row.metadata)) : undefined,
           createdAt: String(row.created_at),
@@ -520,6 +539,70 @@ app.get("/api/runs/:id", async (request, reply) => {
     question: question ?? null,
   };
   return result;
+});
+
+app.get("/api/runs/:id/reviews", async (request, reply) => {
+  const { id } = request.params as { id: string };
+  const run = sqlite.prepare("SELECT id FROM runs WHERE id = ?").get(id);
+  if (!run) return reply.code(404).send({ error: "Lauf nicht gefunden." });
+  const rows = sqlite
+    .prepare(
+      `SELECT a.id, a.title, a.sha256, a.content, a.created_at, s.role
+       FROM artifacts a
+       LEFT JOIN run_stages s ON s.id = a.stage_id
+       WHERE a.run_id = ? AND a.kind = 'role-review'
+       ORDER BY a.created_at, a.rowid`,
+    )
+    .all(id) as Array<{
+    id: string;
+    title: string;
+    sha256: string;
+    content: string;
+    created_at: string;
+    role: string | null;
+  }>;
+  return rows.map((row) => ({
+    id: row.id,
+    role: row.role ?? "Fachreview",
+    title: row.title,
+    sha256: row.sha256,
+    content: row.content,
+    contentHtml: cachedMarkdownHtml(row.content),
+    createdAt: row.created_at,
+  }));
+});
+
+app.get("/api/runs/:id/derived-analyses/top10", async (request, reply) => {
+  const { id } = request.params as { id: string };
+  const run = sqlite.prepare("SELECT id FROM runs WHERE id = ?").get(id);
+  if (!run) return reply.code(404).send({ error: "Lauf nicht gefunden." });
+  return getLatestDerivedAnalysis(id);
+});
+
+app.post("/api/runs/:id/derived-analyses", async (request, reply) => {
+  const { id } = request.params as { id: string };
+  const parsed = z.object({ kind: z.literal("top10_next_steps") }).safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues });
+  try {
+    const result = startDerivedAnalysis({ runId: id, kind: parsed.data.kind });
+    return reply.code(result.reused ? 200 : 202).send(result.job);
+  } catch (error) {
+    return reply.code(409).send({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/derived-analyses/:id", async (request, reply) => {
+  const { id } = request.params as { id: string };
+  return getDerivedAnalysis(id) ?? reply.code(404).send({ error: "Analyse nicht gefunden." });
+});
+
+app.post("/api/derived-analyses/:id/cancel", async (request, reply) => {
+  const { id } = request.params as { id: string };
+  const result = cancelDerivedAnalysis(id);
+  if (result === "not_found") return reply.code(404).send({ error: "Analyse nicht gefunden." });
+  if (result === "not_active")
+    return reply.code(409).send({ error: "Analyse ist nicht mehr aktiv." });
+  return reply.code(202).send({ ok: true });
 });
 
 app.put("/api/runs/archive-all", async () => {

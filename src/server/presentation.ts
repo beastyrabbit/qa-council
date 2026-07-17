@@ -257,6 +257,8 @@ export async function createPresentation(options: {
   runId?: string;
   imageProvider?: ImageProvider | null;
   editorialImageId?: string | null;
+  reportCss?: string;
+  imageSlots?: Array<{ slot: string; hook: string; brief: string; alt: string }>;
   signal?: AbortSignal;
   onEvent?: (event: {
     type: string;
@@ -286,43 +288,76 @@ export async function createPresentation(options: {
   if (!generatedSource) {
     throw new Error("Der Report-Designer hat kein HTML-Package geliefert.");
   }
+  const requestedSlots = options.imageSlots?.length
+    ? options.imageSlots
+    : [
+        {
+          slot: "editorial",
+          hook: "{{EDITORIAL_IMAGE}}",
+          brief: parsedPackage.imageBrief || generatedSource,
+          alt: `Redaktionelle Illustration zu ${options.documentName}`,
+        },
+      ];
+  const generatedSlots = new Map<string, { id: string; html: string }>();
   let imageId = options.editorialImageId;
-  if (
-    imageId === undefined &&
-    options.imageProvider &&
-    options.runId &&
-    options.provider &&
-    options.model
-  ) {
-    try {
-      imageId = await getOrCreateRunImage({
-        runId: options.runId,
-        provider: options.provider,
-        model: options.model,
-        imageProvider: options.imageProvider,
-        documentName: options.documentName,
-        summary: parsedPackage.imageBrief || generatedSource,
-        signal: options.signal,
-        onEvent: options.onEvent,
-      });
-    } catch (error) {
-      if (options.signal?.aborted) throw error;
-      imageId = null;
-      options.onEvent?.({
-        type: "image_generation_failed",
-        level: "warning",
-        message: `Editorialbild konnte nicht erzeugt werden; die Darstellung wird ohne Bild fortgesetzt: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      });
+  await Promise.all(
+    requestedSlots.map(async (slot) => {
+      let id =
+        slot.hook === "{{EDITORIAL_IMAGE}}" && options.editorialImageId !== undefined
+          ? options.editorialImageId
+          : undefined;
+      if (
+        id === undefined &&
+        options.imageProvider &&
+        options.runId &&
+        options.provider &&
+        options.model
+      ) {
+        try {
+          id = await getOrCreateRunImage({
+            runId: options.runId,
+            slot: `${options.kind}:${slot.slot}`,
+            provider: options.provider,
+            model: options.model,
+            imageProvider: options.imageProvider,
+            documentName: options.documentName,
+            summary: slot.brief,
+            signal: options.signal,
+            onEvent: options.onEvent,
+          });
+        } catch (error) {
+          if (options.signal?.aborted) throw error;
+          id = null;
+          options.onEvent?.({
+            type: "image_generation_failed",
+            level: "warning",
+            message: `Bild-Slot „${slot.slot}“ konnte nicht erzeugt werden: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+            data: { slot: slot.slot, kind: options.kind },
+          });
+        }
+      }
+      if (slot.hook === "{{EDITORIAL_IMAGE}}") imageId = id;
+      if (id) {
+        generatedSlots.set(slot.hook, {
+          id,
+          html: `<figure class="editorial-image visual-image">
+            <img src="/api/images/${id}" alt="${escapeHtml(slot.alt)}" loading="eager">
+            <figcaption>Dokumentbezogenes Motiv · für diesen QA-Lauf erzeugt</figcaption>
+          </figure>`,
+        });
+      }
+    }),
+  );
+  const applyImages = (html: string) => {
+    for (const slot of requestedSlots) {
+      html = html.replaceAll(slot.hook, generatedSlots.get(slot.hook)?.html ?? "");
     }
-  }
-  const generatedImage = imageId
-    ? `<div class="editorial-image">
-        <img src="/api/images/${imageId}" alt="Redaktionelle Illustration zu ${escapeHtml(options.documentName)}" loading="eager">
-        <span>Dokumentbezogenes Editorialmotiv · für diesen QA-Lauf erzeugt</span>
-      </div>`
-    : "";
+    return html.replace(/\{\{(?:EDITORIAL_IMAGE|REPORT_IMAGE_[A-Z0-9_]+)\}\}/g, "");
+  };
+  const withReportCss = (html: string) =>
+    options.reportCss ? `<style data-report-workspace>${options.reportCss}</style>${html}` : html;
 
   if (onePaper) {
     if (!parsedPackage.onepaper) {
@@ -339,16 +374,10 @@ export async function createPresentation(options: {
         options.documentName,
       )}</strong></header><main class="onepaper-content">${sheet}</main><footer class="onepaper-footer"><span>Entscheidungsgrundlage</span><b>QA Council</b></footer></section>`;
     }
-    sheet = sheet.includes("{{EDITORIAL_IMAGE}}")
-      ? sheet.replace("{{EDITORIAL_IMAGE}}", generatedImage)
-      : sheet.replace(/(<\/header>)/i, `$1${generatedImage}`);
+    sheet = applyImages(sheet);
     return {
       title: `Visual Report · ${options.documentName}`,
-      html: shell(
-        "onepaper",
-        options.documentName,
-        `${sheet}<section class="result-appendix">${full}</section>`,
-      ),
+      html: withReportCss(shell("onepaper", options.documentName, sheet)),
       editorialImageId: imageId,
     };
   }
@@ -375,10 +404,8 @@ export async function createPresentation(options: {
   });
   const navigationSections = newspaperPages.map((page) => ({ ...page, markdown: "" }));
   let front = layoutHtml(parsed.front);
-  front = front.includes("{{EDITORIAL_IMAGE}}")
-    ? front.replace("{{EDITORIAL_IMAGE}}", generatedImage)
-    : `${generatedImage}${front}`;
-  if (!generatedImage) {
+  front = applyImages(front);
+  if (!imageId) {
     front = front.replace(
       /<figure(?:\s[^>]*)?>\s*(?:<figcaption(?:\s[^>]*)?>[\s\S]*?<\/figcaption>)?\s*<\/figure>/gi,
       "",
@@ -388,22 +415,24 @@ export async function createPresentation(options: {
     (page): PresentationPage => ({
       slug: page.slug,
       title: page.title,
-      html: shell(
-        "newspaper",
-        options.documentName,
-        `${layoutHtml(page.html)}
+      html: withReportCss(
+        shell(
+          "newspaper",
+          options.documentName,
+          `${applyImages(layoutHtml(page.html))}
          <footer class="newspaper-page-footer"><a href="${RESULT_BASE}">← Zur Titelseite</a><span>QA REPORT · ${escapeHtml(
            options.documentName,
          )}</span></footer>`,
-        navigationSections,
-        page.slug,
+          navigationSections,
+          page.slug,
+        ),
       ),
     }),
   );
 
   return {
     title: `QA-Tageszeitung · ${options.documentName}`,
-    html: shell("newspaper", options.documentName, front, navigationSections),
+    html: withReportCss(shell("newspaper", options.documentName, front, navigationSections)),
     pages,
     editorialImageId: imageId,
   };

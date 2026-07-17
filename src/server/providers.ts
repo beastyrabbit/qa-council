@@ -14,6 +14,7 @@ import {
 import type { OpenRouterRoutingMode, ProviderId, ProviderModel } from "../shared/types.js";
 import { decryptSecret } from "./crypto.js";
 import { sqlite } from "./db/index.js";
+import { createWorkspaceReadEditTools, safeWorkspaceEventPath } from "./workspace-tools.js";
 
 const dataDir = process.env.DATA_DIR ?? path.resolve("data");
 const piDir = path.join(dataDir, "pi");
@@ -251,6 +252,8 @@ export interface PiStageResult {
   events: Array<{ type: string; message: string; data?: unknown }>;
 }
 
+export type PiToolMode = "read-edit";
+
 function safeEvent(event: AgentSessionEvent) {
   if (event.type === "message_update") return null;
   if (event.type === "compaction_start" || event.type === "compaction_end") {
@@ -266,10 +269,20 @@ export async function runPiStage(options: {
   prompt: string;
   images?: ImageContent[];
   signal?: AbortSignal;
+  workspaceDir?: string;
+  toolMode?: PiToolMode;
   onEvent?: (event: { type: string; message: string; data?: unknown }) => void;
   onStream?: (channel: "thinking" | "text", delta: string) => void;
 }): Promise<PiStageResult> {
   options.signal?.throwIfAborted();
+  if (Boolean(options.workspaceDir) !== Boolean(options.toolMode)) {
+    throw new Error("workspaceDir und toolMode müssen gemeinsam gesetzt werden.");
+  }
+  const workspace =
+    options.toolMode === "read-edit" && options.workspaceDir
+      ? await createWorkspaceReadEditTools(options.workspaceDir)
+      : undefined;
+  const sessionCwd = workspace?.root ?? process.cwd();
   const registry = providerRegistry();
   const providerName = options.provider === "codex" ? "openai-codex" : options.provider;
   let model = registry.find(providerName, options.modelId);
@@ -320,7 +333,7 @@ export async function runPiStage(options: {
     hideThinkingBlock: true,
   });
   const resourceLoader = new DefaultResourceLoader({
-    cwd: process.cwd(),
+    cwd: sessionCwd,
     agentDir: piDir,
     settingsManager,
     noExtensions: true,
@@ -334,19 +347,22 @@ export async function runPiStage(options: {
   options.signal?.throwIfAborted();
 
   const { session } = await createAgentSession({
-    cwd: process.cwd(),
+    cwd: sessionCwd,
     agentDir: piDir,
     authStorage,
     modelRegistry: registry,
     model,
     thinkingLevel: model.reasoning ? "high" : "off",
-    noTools: "all",
-    sessionManager: SessionManager.inMemory(process.cwd()),
+    noTools: workspace ? "builtin" : "all",
+    tools: workspace ? ["read", "edit"] : undefined,
+    customTools: workspace?.tools,
+    sessionManager: SessionManager.inMemory(sessionCwd),
     settingsManager,
     resourceLoader,
   });
 
   const captured: PiStageResult["events"] = [];
+  const workspaceToolCalls = new Map<string, { tool: "read" | "edit"; path: string }>();
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "message_update") {
       const assistantEvent = event.assistantMessageEvent;
@@ -358,6 +374,38 @@ export async function runPiStage(options: {
         options.onStream?.("text", assistantEvent.delta);
         return;
       }
+    }
+    if (workspace && event.type === "tool_execution_start") {
+      if (event.toolName !== "read" && event.toolName !== "edit") return;
+      const file = safeWorkspaceEventPath(event.args?.path);
+      const metadata = {
+        tool: event.toolName as "read" | "edit",
+        path: file,
+      };
+      workspaceToolCalls.set(event.toolCallId, metadata);
+      const safe = {
+        type: "workspace_tool_start",
+        message: `Workspace: ${event.toolName} ${file}`,
+        data: metadata,
+      };
+      captured.push(safe);
+      options.onEvent?.(safe);
+      return;
+    }
+    if (workspace && event.type === "tool_execution_end") {
+      const metadata = workspaceToolCalls.get(event.toolCallId);
+      if (!metadata) return;
+      workspaceToolCalls.delete(event.toolCallId);
+      const safe = {
+        type: "workspace_tool_end",
+        message: `Workspace: ${metadata.tool} ${metadata.path} ${
+          event.isError ? "fehlgeschlagen" : "abgeschlossen"
+        }`,
+        data: { ...metadata, success: !event.isError },
+      };
+      captured.push(safe);
+      options.onEvent?.(safe);
+      return;
     }
     const safe = safeEvent(event);
     if (!safe) return;
