@@ -66,7 +66,7 @@ describe("kanonischer RACI-Katalog", () => {
           rationale: "Die Akzeptanzkriterien benötigen eine Prüfung.",
         },
       ],
-      new Set([locator]),
+      new Set(["Offene Entscheidung · Zeilen 1–32"]),
     );
 
     expect(result.errors).toEqual([]);

@@ -122,6 +122,21 @@ export function compileRaciAssignments(
   proposals: ProposedActivityRoute[],
   allowedLocators?: ReadonlySet<string>,
 ) {
+  const isAllowedLocator = (candidate: string) => {
+    if (!allowedLocators || allowedLocators.has(candidate)) return true;
+    const parsedCandidate = candidate.match(/^(.*?)\s+·\s+Zeilen\s+(\d+)[–-](\d+)$/i);
+    if (!parsedCandidate) return false;
+    const candidateStart = Number(parsedCandidate[2]);
+    const candidateEnd = Number(parsedCandidate[3]);
+    return [...allowedLocators].some((allowed) => {
+      const parsedAllowed = allowed.match(/^(.*?)\s+·\s+Zeilen\s+(\d+)[–-](\d+)$/i);
+      return (
+        parsedAllowed?.[1].trim() === parsedCandidate[1].trim() &&
+        candidateStart >= Number(parsedAllowed[2]) &&
+        candidateEnd <= Number(parsedAllowed[3])
+      );
+    });
+  };
   const catalog = raciCatalog();
   const errors: string[] = [];
   const seen = new Set<string>();
@@ -161,10 +176,7 @@ export function compileRaciAssignments(
       errors.push(`RACI ${proposal.id} hat keinen Dokumentbeleg.`);
     } else if (
       normalizedEvidence.some(
-        (locator) =>
-          typeof locator !== "string" ||
-          !locator.trim() ||
-          (allowedLocators && !allowedLocators.has(locator)),
+        (locator) => typeof locator !== "string" || !locator.trim() || !isAllowedLocator(locator),
       )
     ) {
       errors.push(`RACI ${proposal.id} enthält einen unbekannten oder leeren Dokument-Locator.`);
