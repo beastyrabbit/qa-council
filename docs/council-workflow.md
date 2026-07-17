@@ -72,7 +72,11 @@ Bei einer notwendigen Rückfrage wechselt der Lauf auf `waiting_for_input`. Die 
 - Test-Automation-Engineer
 - Tester
 
-Jede Rolle arbeitet zunächst in einer eigenen Pi-Session. Sie sieht während des Einzelreviews keine Antworten der anderen Rollen. Jeder wesentliche Befund soll einen Locator enthalten. Der Abschluss enthält einen `Consensus-Score` von 1 bis 5; fehlt ein gültiger Wert, gilt gemäß Council-Regel der Fallback 3.
+Jede Rolle arbeitet zunächst in einer eigenen Pi-Session. Sie sieht während des Einzelreviews keine
+Antworten der anderen Rollen. Jeder wesentliche Befund soll einen Locator enthalten; der
+KONFIDENZ-Block der jeweiligen Rollenvorlage ist Pflicht. Konsens wird nicht von den
+Einzelreviewern bewertet, sondern anschließend aus den unabhängigen Cross-Review-Pässen
+(`KONSENS-STAERKE: 1–5`, ungültig oder fehlend → 3) berechnet.
 
 ## Modi
 
@@ -86,16 +90,19 @@ Jede Rolle arbeitet zunächst in einer eigenen Pi-Session. Sie sieht während de
 ### Standard
 
 - mindestens drei anwendbare Rollen
-- ein Cross-Review je beteiligter Rolle
-- Debatte nur bei durchschnittlichem Consensus-Score ab 4,0
-- Chairman-Synthese
+- mindestens drei frische Cross-Review-Pässe; Rollenlabels werden zuvor zu `R1…Rn` anonymisiert
+- Debatte nur bei durchschnittlicher Konsens-Stärke ab 4,0
+- bei Debatte zwei sichtbare, sequenzielle Stufen: **Ankläger**, danach **Verteidiger** mit der
+  Ankläger-Antwort als Input
+- Chairman-Synthese plus eigener Dissens-Pass
 
 ### Deep
 
 - alle fünf Rollen
-- Cross-Review durch jede Rolle
-- Debatte wird immer durchgeführt
-- Dual-Chairman-Synthese mit sichtbarem Dissens
+- fünf frische, anonymisierte Cross-Review-Pässe
+- getrennte Ankläger-/Verteidiger-Debatte wird immer durchgeführt
+- zwei voneinander unabhängige Chairman-Stufen für Konsens- und Minderheitsfassung
+- eigener Dual-Chairman-Dissens-Pass über beide Fassungen und das Rohmaterial
 
 ## Finales Ergebnis
 
@@ -112,10 +119,10 @@ Jede Modellantwort wird zusätzlich als virtuelles Artefakt gespeichert. Dazu ge
 
 ## Präsentationsstufe
 
-Die Präsentationsstufe startet erst nach Speicherung des finalen Artefakts:
+Die Report-Design-Stufe startet erst nach Speicherung des finalen Artefakts. Sie lädt den
+hash-geprüften `report-designer`-Skill und erzeugt Tageszeitung und Visual Report gemeinsam, direkt als
+HTML. Nach dem fertigen Package läuft einmalig die statische HTML/CSS/JS-Prüfung und bei Bedarf
+genau eine Agent-Korrekturstufe. `text` rendert separat das vollständige kanonische Markdown.
 
-- `text` rendert das vollständige Markdown deterministisch zu bereinigtem HTML.
-- `newspaper` lässt eine kurze redaktionelle Titelseite erstellen und hängt das vollständige Ergebnis als Vertiefung an.
-- `onepaper` lässt eine kompakte Entscheidungsvorlage erstellen. Die Risikografik zählt reale Risikobegriffe im finalen Ergebnis.
-
-Die Verdichtung darf keine neuen Befunde oder Zahlen erfinden. Das finale Artefakt bleibt unverändert und kann unabhängig von den Darstellungen heruntergeladen werden.
+Die Verdichtung darf keine neuen Befunde oder Zahlen erfinden. Das finale Artefakt bleibt
+unverändert und kann unabhängig von den Darstellungen heruntergeladen werden.

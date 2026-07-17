@@ -1,6 +1,6 @@
 # QA Council
 
-QA Council prüft hochgeladene Dokumente mit einem nachvollziehbaren Multi-Rollen-Workflow auf Basis des Pi SDK. Die acht gelieferten QA-Quelldateien liegen unverändert unter `resources/qa/source` und werden vor jedem Lauf gegen fest eingebaute SHA-256-Werte geprüft.
+QA Council prüft hochgeladene Dokumente mit einem nachvollziehbaren Multi-Rollen-Workflow auf Basis des Pi SDK. Die acht gelieferten QA-Quelldateien liegen unverändert unter `resources/qa/source`. Der eigene Report-Designer liegt unter `resources/skills/report-designer`. Beide Quellen werden vor ihrer Verwendung gegen fest eingebaute SHA-256-Werte geprüft.
 
 ## Funktionsumfang
 
@@ -10,7 +10,11 @@ QA Council prüft hochgeladene Dokumente mit einem nachvollziehbaren Multi-Rolle
 - Council-Modi Auto, Quick, Standard und Deep
 - Triage/RACI, isolierte Rollenreviews, Cross-Reviews, Debatte und Synthese gemäß den kanonischen Quellen
 - persistentes Detailprotokoll ohne Speicherung versteckter Gedankengänge
-- finales Markdown als kanonisches Ergebnis; HTML/Text, QA-Zeitung und One-Paper als nachgelagerte Darstellungen
+- finales Markdown als kanonisches Ergebnis; danach eine sichtbare Report-Design-Modellstufe, die pro Lauf eine individuelle mehrseitige HTML-Tageszeitung und einen diagrammreichen Visual Report von Grund auf erzeugt
+- dokumentbezogene Illustration pro Lauf über OpenAI, ein bildfähiges OpenRouter-Modell oder ComfyUI; stabile Ergebnis-/Unterseiten-URLs und A4-PDF-Export
+- eigene Dokument- und Archivbereiche mit erneutem Prüfen, Archivieren aller abgeschlossenen Läufe und gezieltem Löschen fehlgeschlagener Läufe
+- eigener Testmodus für parallele, voneinander getrennte Vergleiche von Codex, OpenRouter und AI Box mit individueller Modellauswahl und durchsuchbaren Modelllisten
+- statische Schlussprüfung des erzeugten Report-Packages auf HTML-Struktur, unbekannte CSS-Klassen und unerlaubtes JavaScript; nur bei Befunden folgt genau eine sichtbare Agent-Korrekturstufe
 - SQLite/Drizzle auf einem persistenten Volume; Modellartefakte bleiben virtuelle Datenbankobjekte
 
 ## Dokumentation

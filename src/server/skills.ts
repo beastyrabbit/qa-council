@@ -31,6 +31,16 @@ const candidates = [
   "/app/resources/qa/source",
 ];
 
+export const REPORT_DESIGN_SKILL_FILE = "report-designer/SKILL.md";
+export const EXPECTED_REPORT_DESIGN_SKILL_HASH =
+  "a2aa4f50ea94700fa4fa05961a4eea4bc1d3e2acbdd97648338b34ef8eda5a80";
+
+const reportSkillCandidates = [
+  path.resolve("resources/skills"),
+  path.resolve(process.cwd(), "../resources/skills"),
+  "/app/resources/skills",
+];
+
 export function skillDirectory(): string {
   const directory = candidates.find((candidate) => fs.existsSync(candidate));
   if (!directory) throw new Error("Kanonische QA-Skill-Quellen wurden nicht gefunden.");
@@ -60,6 +70,17 @@ export function completeCouncilSource(): string {
   return CANONICAL_SKILL_FILES.map(
     (filename) => `\n\n===== KANONISCHE QUELLE: ${filename} =====\n\n${skills[filename]}`,
   ).join("");
+}
+
+export function loadReportDesignSkill(): string {
+  const directory = reportSkillCandidates.find((candidate) => fs.existsSync(candidate));
+  if (!directory) throw new Error("Der kanonische Report-Design-Skill wurde nicht gefunden.");
+  const content = fs.readFileSync(path.join(directory, REPORT_DESIGN_SKILL_FILE));
+  const actual = sha256(content);
+  if (actual !== EXPECTED_REPORT_DESIGN_SKILL_HASH) {
+    throw new Error(`Integritätsfehler in ${REPORT_DESIGN_SKILL_FILE}: ${actual}`);
+  }
+  return content.toString("utf8");
 }
 
 export function roleSkillFile(role: string): string {

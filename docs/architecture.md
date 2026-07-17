@@ -12,8 +12,10 @@ flowchart LR
     P --> C[Codex OAuth]
     P --> R[OpenRouter]
     P --> X[Lokale AI Box]
+    O --> RD[Report-Designer-Skill]
+    RD --> P
     O --> D
-    D --> V[HTML / Zeitung / One-Paper]
+    D --> V[Text / mehrseitige HTML-Tageszeitung / visueller HTML-Report]
     V --> U
 ```
 
@@ -29,6 +31,7 @@ Die Anwendung wird als TypeScript-Projekt betrieben:
 
 ```text
 resources/qa/source/       Unveränderte kanonische QA-Quelldateien
+resources/skills/          Hash-geprüfter Report-Designer-Skill
 src/shared/                Gemeinsame API- und Domänentypen
 src/server/                Fastify, Datenbank, Extraktion und Orchestrierung
 src/server/db/             Drizzle-Schema und SQLite-Initialisierung
@@ -47,7 +50,12 @@ docs/                      Projektdokumentation
 6. Ein Lauf referenziert Dokument, Provider, Modell, Council-Modus, Fokus und gewünschte erste Darstellung.
 7. Der Orchestrator erzeugt Stufen, Events und virtuelle Artefakte.
 8. Nach der Synthese wird das kanonische finale Markdown gespeichert.
-9. Erst danach wird die gewünschte Präsentation erzeugt und gespeichert.
+9. Eine eigene, live sichtbare Pi-Stufe lädt den Report-Designer-Skill und erzeugt aus dem fachlich abgeschlossenen Ergebnis direkt ein HTML-Package mit mehrseitiger Tageszeitung, diagrammreichem Visual Report und Bildbriefing. Sie verwendet keinen Markdown-zu-HTML-Konverter.
+10. Nach der fertigen Report-Antwort prüft der Server einmalig Transportstruktur, HTML-Verschachtelung, erforderliche Seiten und Hooks, das bekannte CSS-Klassenvokabular sowie verbotene JavaScript-Elemente und Attribute. Bei Befunden erhält derselbe Report-Agent den vollständigen Fehlerbericht und genau eine Korrekturrunde; anschließend folgt eine statische Nachprüfung.
+11. Bei Codex und visionfähigen OpenRouter-Modellen rendert Chromium beide HTML-Ausgaben einmal als Screenshot. Eine sichtbare Vision-Stufe darf Hierarchie und Layout daraufhin einmal verbessern; eine weitere statische Vertragsprüfung entscheidet, ob die Revision übernommen wird. Lokale Modelle überspringen diesen Schritt.
+12. Beide Designausgaben werden für jeden Lauf gespeichert. Die Textdarstellung rendert separat das kanonische Markdown.
+13. Jeder neue Lauf kann ein dokumentbezogenes Editorialmotiv erzeugen: Codex über die native OpenAI-Bild-API, OpenRouter nativ bei bildfähigem Modell und sonst optional über ComfyUI, die AI Box optional über ComfyUI. Tageszeitung, Visual Report und PDF desselben Laufs verwenden gemeinsam dieses eine Motiv.
+14. Ein Vergleich legt einen eigenen `comparisons`-Datensatz an und startet je erreichbarer Provider-/Modellwahl einen normalen, aber mit `comparison_id` isolierten Council-Lauf. `/api/runs` liefert diese Läufe bewusst nicht aus; sie werden ausschließlich über die Vergleichs-API und den Testmodus angezeigt.
 
 ## Datenbank
 
@@ -58,11 +66,12 @@ Die Datei liegt unter `${DATA_DIR}/qa-council.sqlite`. SQLite läuft im WAL-Modu
 | `documents` | Original-BLOB, extrahierter Text, MIME-Typ, Größe und Hash |
 | `document_chunks` | Vollständige, geordnete Textabschnitte mit Locator und Hash |
 | `runs` | Konfiguration, Status und Fortschritt eines Council-Laufs |
+| `comparisons` | Gemeinsame Quelle und Konfiguration eines getrennten Providervergleichs |
 | `run_stages` | Einzelne Modellstufen, Tokenverbrauch, Kosten und Prompt-Hash |
 | `run_questions` | Ground-or-Ask-Rückfragen und Antworten |
 | `artifacts` | Virtuelle Review-, Debate-, Synthese- und Finaldateien |
 | `events` | Zeitlich geordnetes Detailprotokoll |
-| `presentations` | Bereinigtes HTML der drei Ergebnisdarstellungen |
+| `presentations` | Bereinigtes HTML der drei Ergebnisdarstellungen einschließlich Zeitungs-Unterseiten |
 | `provider_settings` | Modellwahl, Endpunkte und verschlüsselte API-Keys |
 | `app_settings` | Globale Anwendungseinstellungen |
 
@@ -75,13 +84,22 @@ Provider-Keys werden mit AES-256-GCM verschlüsselt. Ohne gesetzten `SETTINGS_EN
 | `GET` | `/api/health` | Readiness- und Liveness-Prüfung |
 | `GET` | `/api/documents` | Dokumentliste |
 | `POST` | `/api/documents` | Datei hochladen und extrahieren |
+| `GET` | `/api/documents/:id` | Dokumentmetadaten und extrahierten Inhalt laden |
+| `GET` | `/api/documents/:id/download` | Gespeichertes Original laden |
 | `DELETE` | `/api/documents/:id` | Dokument einschließlich abhängiger Daten löschen |
-| `GET` | `/api/runs` | Laufhistorie |
+| `GET` | `/api/runs` | Normale Laufhistorie ohne Vergleichsläufe |
 | `POST` | `/api/runs` | Neuen Council-Lauf starten |
 | `GET` | `/api/runs/:id` | Lauf, Events, Artefakte, Fragen und Präsentationen |
+| `PUT` | `/api/runs/archive-all` | Alle fertigen und fehlgeschlagenen aktiven Läufe archivieren |
+| `PUT` | `/api/runs/:id/archive` | Einzelnen Lauf archivieren oder wiederherstellen |
+| `DELETE` | `/api/runs/:id` | Fehlgeschlagenen Lauf löschen |
 | `POST` | `/api/runs/:id/answer` | Ground-or-Ask beantworten und Lauf fortsetzen |
+| `GET` | `/api/comparisons` | Getrennte Providervergleiche mit ihren Läufen |
+| `GET` | `/api/comparisons/:id` | Einen Vergleich direkt und reload-sicher laden |
+| `POST` | `/api/comparisons` | Erreichbare Provider-/Modellkombinationen parallel starten |
 | `POST` | `/api/runs/:id/presentations` | Zusätzliche Darstellung erzeugen |
 | `GET` | `/api/runs/:id/download` | Finales Ergebnis als Markdown herunterladen |
+| `GET` | `/api/presentations/:id/pdf` | Visual Report als mehrseitiges PDF laden |
 | `GET` | `/api/providers/:provider/models` | Verfügbare Modelle abrufen |
 | `GET` | `/api/settings` | Bereinigte Einstellungen ohne Secret-Werte |
 | `PUT` | `/api/settings` | Modelle, Endpunkte, Sprache und API-Key aktualisieren |
@@ -93,7 +111,7 @@ Provider-Keys werden mit AES-256-GCM verschlüsselt. Ohne gesetzten `SETTINGS_EN
 - Hochgeladene Inhalte gelten als nicht vertrauenswürdige Daten, nicht als Agentenanweisungen.
 - Pi-Sessions erhalten keine Datei-, Shell- oder sonstigen Werkzeuge.
 - Jede Session verwendet `SessionManager.inMemory()`.
-- Kontextkompaktierung ist deaktiviert, damit Regeln nicht still zusammengefasst werden.
+- Pi-Kontextkompaktierung ist aktiviert; jede fachliche Modellstufe bleibt eine eigene In-Memory-Session mit vollständig neu geladenen, hash-geprüften Skillregeln.
 - Systemprompts werden ausschließlich aus hash-geprüften Projektquellen erzeugt.
-- Präsentations-Markdown wird vor der Speicherung als HTML mit einer Tag- und Attribut-Allowlist bereinigt.
+- Tageszeitung und Visual Report werden vom Report-Designer direkt als HTML erzeugt. Der Server entfernt vor der Speicherung alle nicht erlaubten Tags und Attribute und ergänzt nur Navigation, stabile URLs und PDF-Hooks.
 - Versteckte Thinking-Deltas werden aus dem Ereignisprotokoll ausgeschlossen.

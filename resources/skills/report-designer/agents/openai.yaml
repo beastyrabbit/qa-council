@@ -1,0 +1,4 @@
+interface:
+  display_name: "Report Designer"
+  short_description: "Erzeugt Zeitung und One-Pager als individuelles HTML."
+  default_prompt: "Erzeuge aus dem finalen QA-Council-Ergebnis eine eigenständig gestaltete mehrseitige Zeitung und einen druckbaren One-Pager."

@@ -26,6 +26,7 @@ jobs:
         run: pnpm check
 
   container:
+    needs: quality
     runs-on: personal
     steps:
       - name: Checkout repository

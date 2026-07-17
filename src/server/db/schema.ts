@@ -30,6 +30,7 @@ export const runs = sqliteTable("runs", {
   mode: text("mode").notNull(),
   resolvedMode: text("resolved_mode"),
   presentation: text("presentation").notNull(),
+  imageProvider: text("image_provider"),
   focus: text("focus"),
   status: text("status").notNull(),
   progress: integer("progress").notNull().default(0),
@@ -37,6 +38,17 @@ export const runs = sqliteTable("runs", {
   error: text("error"),
   createdAt: text("created_at").notNull(),
   completedAt: text("completed_at"),
+  archivedAt: text("archived_at"),
+  comparisonId: text("comparison_id"),
+});
+
+export const comparisons = sqliteTable("comparisons", {
+  id: text("id").primaryKey(),
+  documentId: text("document_id").notNull(),
+  mode: text("mode").notNull(),
+  presentation: text("presentation").notNull(),
+  focus: text("focus"),
+  createdAt: text("created_at").notNull(),
 });
 
 export const runStages = sqliteTable("run_stages", {
@@ -49,6 +61,8 @@ export const runStages = sqliteTable("run_stages", {
   inputTokens: integer("input_tokens").notNull().default(0),
   outputTokens: integer("output_tokens").notNull().default(0),
   cost: integer("cost_micros").notNull().default(0),
+  thinkingText: text("thinking_text").notNull().default(""),
+  outputText: text("output_text").notNull().default(""),
   startedAt: text("started_at").notNull(),
   completedAt: text("completed_at"),
 });
@@ -94,6 +108,18 @@ export const presentations = sqliteTable("presentations", {
   title: text("title").notNull(),
   html: text("html").notNull(),
   sourceArtifactId: text("source_artifact_id").notNull(),
+  pagesJson: text("pages_json").notNull().default("[]"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const generatedImages = sqliteTable("generated_images", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull(),
+  provider: text("provider").notNull(),
+  prompt: text("prompt").notNull(),
+  remotePromptId: text("remote_prompt_id"),
+  mimeType: text("mime_type").notNull(),
+  data: blob("data", { mode: "buffer" }).notNull(),
   createdAt: text("created_at").notNull(),
 });
 

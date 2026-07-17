@@ -1,6 +1,6 @@
 # QA Council – Dokumentation
 
-QA Council ist eine Webanwendung für nachvollziehbare, mehrstufige Qualitätsprüfungen von Dokumenten. Ein hochgeladenes Dokument wird von einem rollenbasierten QA Council geprüft. Das vollständige fachliche Ergebnis entsteht immer zuerst; HTML/Text, QA-Zeitung und One-Paper werden anschließend als separate Darstellungen daraus erzeugt.
+QA Council ist eine Webanwendung für nachvollziehbare, mehrstufige Qualitätsprüfungen von Dokumenten. Ein hochgeladenes Dokument wird von einem rollenbasierten QA Council geprüft. Das vollständige fachliche Ergebnis entsteht immer zuerst; HTML/Text, QA-Tageszeitung und Visual Report werden anschließend als separate Darstellungen daraus erzeugt.
 
 ## Dokumentationsübersicht
 
@@ -34,7 +34,7 @@ Textformate werden direkt gelesen. Binärformate werden über Apache Tika extrah
 ## Ergebnisse
 
 - **HTML / Nur Text:** vollständiges, bereinigtes HTML des finalen Markdown-Ergebnisses; das Markdown kann heruntergeladen werden.
-- **QA-Zeitung:** redaktionelle Titelseite mit Hauptaussagen und Sprung zum vollständigen Ergebnis.
-- **One-Paper:** kompakte Entscheidungsvorlage mit datenbasierten Risikobalken und vollständigem Ergebnis als Vertiefung.
+- **QA-Tageszeitung:** laute redaktionelle Titelseite plus eigenständige Ressortseiten.
+- **Visual Report:** scrollbare HTML-Publikation mit belegten Diagrammen, Prozessbildern, Matrizen und PDF-Export.
 
 Weitere Darstellungen können nach einem abgeschlossenen Lauf erzeugt werden, ohne den Council erneut auszuführen.

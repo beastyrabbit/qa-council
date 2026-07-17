@@ -3,8 +3,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CANONICAL_SKILL_FILES,
+  EXPECTED_REPORT_DESIGN_SKILL_HASH,
   EXPECTED_SKILL_HASHES,
   loadCanonicalSkills,
+  loadReportDesignSkill,
+  REPORT_DESIGN_SKILL_FILE,
   sha256,
 } from "./skills.js";
 
@@ -23,5 +26,11 @@ describe("kanonische QA-Skills", () => {
     const matrix = loadCanonicalSkills()["07_RACI-Team-Matrix.md"];
     const rows = matrix.split("\n").filter((line) => /^\|\s*\d+(?:\.\d+)?[a-z]?\s*\|/i.test(line));
     expect(rows).toHaveLength(37);
+  });
+
+  it("lädt den Report-Designer als eigene hash-geprüfte Laufzeit-Skillquelle", () => {
+    const bytes = fs.readFileSync(path.resolve("resources/skills", REPORT_DESIGN_SKILL_FILE));
+    expect(sha256(bytes)).toBe(EXPECTED_REPORT_DESIGN_SKILL_HASH);
+    expect(Buffer.from(loadReportDesignSkill())).toEqual(bytes);
   });
 });

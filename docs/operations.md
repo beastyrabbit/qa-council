@@ -43,8 +43,12 @@ docker compose up --build
 | `DATA_DIR` | `./data` | SQLite, Verschlüsselungsschlüssel und Pi-Auth |
 | `TIKA_URL` | `http://127.0.0.1:9998` | Apache-Tika-Basisadresse |
 | `AIBOX_URL` | `http://192.168.10.120:11434` | lokale Ollama-kompatible AI Box |
+| `COMFYUI_URL` | `http://192.168.10.120:8188` | lokale ComfyUI-Basisadresse |
+| `COMFYUI_CHECKPOINT` | `anima-base-v1.0.safetensors` | vorausgewählter ComfyUI-Checkpoint |
 | `OPENROUTER_API_KEY` | nicht gesetzt | OpenRouter-Zugang |
+| `OPENAI_API_KEY` | nicht gesetzt | Native OpenAI-Bildgenerierung für Codex-Läufe |
 | `SETTINGS_ENCRYPTION_KEY` | lokales Schlüssel-File | Schlüsselmaterial für gespeicherte Provider-Keys |
+| `CHROMIUM_PATH` | `/usr/bin/chromium` | Chromium-Binary für PDF-Export und visuellen Screenshot-Review |
 
 ## Qualitätsprüfungen
 
@@ -69,6 +73,8 @@ Für eine vollständige Wiederherstellung müssen gemeinsam gesichert werden:
 - `qa-council.sqlite-wal` und `qa-council.sqlite-shm`, falls SQLite während des Backups läuft
 - `settings.key`, sofern kein fester `SETTINGS_ENCRYPTION_KEY` verwendet wird
 - `pi/auth.json`, falls die Codex-OAuth-Anmeldung wiederhergestellt werden soll
+
+Generierte ComfyUI-Bilder liegen als BLOB in `qa-council.sqlite` und sind damit im Datenbankbackup enthalten.
 
 Im Kubernetes-Betrieb liegt das gesamte Verzeichnis unter `/data` auf einem Longhorn-PVC. Für konsistente Offline-Backups sollte die Anwendung angehalten werden. Alternativ ist die SQLite-Backup-API beziehungsweise ein Storage-Snapshot zu verwenden.
 
@@ -99,7 +105,23 @@ Im Kubernetes-Betrieb liegt das gesamte Verzeichnis unter `/data` auf einem Long
 
 ### Lauf wartet auf Eingabe
 
-Dies ist kein Fehler. Im Details-Panel steht die konkrete Ground-or-Ask-Frage. Nach Absenden der Antwort wird die Prüfung wieder aufgenommen.
+Dies ist kein Fehler. Auf der Vollseiten-Laufansicht steht die konkrete Ground-or-Ask-Frage. Nach Absenden der Antwort wird die Prüfung wieder aufgenommen.
+
+## Laufprotokoll, Archiv und Ergebnisse
+
+- Die Route `/runs/<run-id>` ist direkt aufrufbar und zeigt den vollständigen Text jeder Modellstufe live. Text- und Thinking-Deltas werden gebündelt in SQLite gespeichert; ein Reload verliert den sichtbaren Fortschritt nicht.
+- **Report-Design · Tageszeitung und Visual Report** ist eine echte Modellstufe. Ihre direkte HTML-Ausgabe läuft sichtbar durch dasselbe Live-Protokoll wie Triage, Rollenreviews und Synthese.
+- Thinking ist separat eingeklappt. Das Systemprotokoll enthält nur relevante Orchestrierungs-, Retry-, Kompaktierungs- und Abschlussmeldungen statt Pi-Lifecycle-Rauschen.
+- Im Menü **Läufe** können alle abgeschlossenen und fehlgeschlagenen Läufe gemeinsam archiviert werden. Das eigene Menü **Archiv** erlaubt Öffnen und Wiederherstellen. Nur fehlgeschlagene Läufe dürfen dauerhaft gelöscht werden.
+- Im Menü **Dokumente** stehen hochgeladene Originale, extrahierter Text, bisherige Läufe und **Erneut prüfen** bereit. Die Seite **Prüfen** enthält nur Upload, Auswahl und Laufkonfiguration.
+- Der Menüpunkt **Testmodus** nimmt ein Vergleichsdokument und bis zu drei Provider-/Modellkombinationen auf. Jede Modellliste hat direkt über dem Dropdown eine Suche nach Name oder ID. Nicht konfigurierte oder nicht erreichbare Kombinationen werden nicht gestartet. Die erzeugten Läufe bleiben vollständig aus **Läufe**, **Archiv** und der normalen Dokumentlaufhistorie heraus und sind unter stabilen `/tests/:id`-URLs vergleichbar.
+- Nach Abschluss der Report-Design-Stufe erscheint `report_static_check_completed` im Systemlog. Bei HTML-, CSS- oder JavaScript-Befunden folgt einmalig die sichtbare Stufe **Report-QA · statische Korrektur** und danach `report_static_recheck_completed`. Eine weiterhin ungültige zweite Fassung beendet den Lauf nachvollziehbar als Fehler.
+- Nach einem Prozessneustart werden noch gequeue-te Läufe erneut eingeplant. Bereits aktive, dadurch unterbrochene Stages werden mit erhaltener Teilausgabe nachvollziehbar als fehlgeschlagen markiert.
+- Jede Darstellung hat mit `/results/<presentation-id>` eine stabile, kopierbare URL. Der SPA-Fallback stellt sicher, dass diese URL auch nach einem direkten Reload funktioniert.
+- Zeitungsressorts sind echte Unterseiten unter `/results/<presentation-id>/<ressort-slug>` und können einzeln kopiert oder neu geladen werden.
+- Pro neuem Lauf erzeugt der Report-Designer Tageszeitung und Visual Report gemeinsam. Das dokumentbezogene Motiv kommt bei Codex nativ von OpenAI, bei einem bildfähigen OpenRouter-Modell nativ von OpenRouter und bei der AI Box beziehungsweise als OpenRouter-Fallback von ComfyUI. Es wird in beiden Ausgaben wiederverwendet.
+- Codex und visionfähige OpenRouter-Modelle erhalten genau einen Chromium-Screenshot-Review der fertigen HTML-Ausgabe. Die lokale AI Box wird davon bewusst ausgenommen.
+- Der Visual Report kann als mehrseitiges PDF geladen werden; seine HTML-Infografiken und Kapitel bleiben dabei erhalten.
 
 ### AI Box meldet Verbindungsfehler
 
@@ -109,6 +131,31 @@ curl -fsS http://192.168.10.120:11434/v1/models
 ```
 
 Bei `no route to host` liegt ein Netzwerk- oder Hostproblem vor. Ein Modellwechsel behebt keine fehlende Route.
+
+### ComfyUI-Bild fehlt
+
+- In den Einstellungen **Verbindung testen** ausführen und den erkannten Checkpoint kontrollieren.
+- Für Anima müssen zusätzlich `qwen_3_06b_base.safetensors` unter `models/text_encoders` und `qwen_image_vae.safetensors` unter `models/vae` verfügbar sein.
+- Im Laufprotokoll nach `ComfyUI-Workflow wurde eingereiht`, `ComfyUI-Titelbild wurde gespeichert` oder einer Warnung mit der konkreten Workflow-Ursache suchen.
+- Direkt prüfen:
+
+```bash
+curl -fsS http://192.168.10.120:8188/system_stats
+curl -fsS http://192.168.10.120:8188/models/checkpoints
+```
+
+### AI Box meldet ein zu kleines Kontextfenster
+
+Modellmaximum, Modelfile-Parameter und tatsächlich geladene Größe prüfen:
+
+```bash
+curl -fsS http://192.168.10.120:11434/api/show \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen3-coder-next:q4km"}'
+curl -fsS http://192.168.10.120:11434/api/ps
+```
+
+Ein hohes `*.context_length` in `model_info` ist nur das theoretische Maximum. Ein kleineres `PARAMETER num_ctx` im Modelfile oder `context_length` in `/api/ps` ist die wirksame Grenze. Die OpenAI-kompatible Schnittstelle kann diese Grenze nicht pro Council-Request erhöhen; dafür muss die Ollama-Serverkonfiguration oder ein Modellalias angepasst werden.
 
 ### Skill-Integritätsfehler
 

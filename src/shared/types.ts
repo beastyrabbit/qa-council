@@ -2,6 +2,8 @@ export type ProviderId = "codex" | "openrouter" | "aibox";
 export type CouncilMode = "auto" | "quick" | "standard" | "deep";
 export type PresentationKind = "text" | "newspaper" | "onepaper";
 export type RunStatus = "queued" | "running" | "waiting_for_input" | "completed" | "failed";
+export type ImageProvider = "comfyui" | "openai" | "openrouter";
+export type OpenRouterRoutingMode = "balanced" | "lowest" | "fastest";
 
 export interface DocumentRecord {
   id: string;
@@ -14,15 +16,21 @@ export interface DocumentRecord {
   error?: string | null;
 }
 
+export interface DocumentDetails extends DocumentRecord {
+  extractedText: string;
+}
+
 export interface RunRecord {
   id: string;
   documentId: string;
   documentName: string;
+  comparisonId?: string | null;
   provider: ProviderId;
   model: string;
   mode: CouncilMode;
   resolvedMode?: Exclude<CouncilMode, "auto"> | null;
   presentation: PresentationKind;
+  imageProvider?: ImageProvider | null;
   focus?: string | null;
   status: RunStatus;
   progress: number;
@@ -30,6 +38,7 @@ export interface RunRecord {
   error?: string | null;
   createdAt: string;
   completedAt?: string | null;
+  archivedAt?: string | null;
 }
 
 export interface RunEvent {
@@ -46,6 +55,7 @@ export interface RunEvent {
 export interface ArtifactRecord {
   id: string;
   runId: string;
+  stageId?: string | null;
   kind: string;
   title: string;
   contentType: string;
@@ -55,17 +65,40 @@ export interface ArtifactRecord {
   createdAt: string;
 }
 
+export interface RunStageRecord {
+  id: string;
+  runId: string;
+  name: string;
+  role?: string | null;
+  status: "running" | "completed" | "failed";
+  thinkingText: string;
+  outputText: string;
+  inputTokens: number;
+  outputTokens: number;
+  costMicros: number;
+  startedAt: string;
+  completedAt?: string | null;
+}
+
 export interface PresentationRecord {
   id: string;
   runId: string;
   kind: PresentationKind;
   title: string;
   html: string;
+  pages: PresentationPage[];
   createdAt: string;
+}
+
+export interface PresentationPage {
+  slug: string;
+  title: string;
+  html: string;
 }
 
 export interface RunDetails {
   run: RunRecord;
+  stages: RunStageRecord[];
   events: RunEvent[];
   artifacts: ArtifactRecord[];
   presentations: PresentationRecord[];
@@ -76,10 +109,37 @@ export interface ProviderModel {
   id: string;
   name: string;
   provider: ProviderId;
+  available?: boolean;
   contextWindow?: number;
+  maximumContextWindow?: number;
+  inputPricePerMillion?: number;
+  outputPricePerMillion?: number;
+  supportsReasoning?: boolean;
+  supportsVision?: boolean;
+}
+
+export interface ComparisonRecord {
+  id: string;
+  documentId: string;
+  documentName: string;
+  mode: CouncilMode;
+  presentation: PresentationKind;
+  focus?: string | null;
+  createdAt: string;
+  runs: RunRecord[];
 }
 
 export interface AppSettings {
-  providers: Record<ProviderId, { model: string; configured: boolean; baseUrl?: string }>;
+  providers: Record<
+    ProviderId,
+    { model: string; configured: boolean; imageConfigured?: boolean; baseUrl?: string }
+  >;
   automaticLanguage: boolean;
+  openRouterRouting: OpenRouterRoutingMode;
+  comfyui: {
+    enabled: boolean;
+    configured: boolean;
+    baseUrl: string;
+    checkpoint: string;
+  };
 }

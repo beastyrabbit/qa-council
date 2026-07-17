@@ -7,7 +7,7 @@
 - ClusterIP: `10.96.0.178`
 - öffentliche Adresse: `https://qa-council.skyway.tools`
 - Company-Pangolin-Site: `foolhardy-letheobia-simonii`
-- initiale SSO-Rolle: `Tobias`
+- SSO-Rollen: `René` und `Tobias`
 
 Die GitOps-Dateien liegen im separaten Repository `kub-homelab`:
 
@@ -56,7 +56,7 @@ Die Anwendung verwendet bewusst eine Recreate-Strategie und eine Replik. SQLite 
 | QA Council | 100m CPU, 256 MiB | 2 GiB RAM |
 | Tika | 100m CPU, 512 MiB | 2 CPU, 3 GiB RAM |
 
-Beide Container laufen ohne privilegierte Rechte und ohne Service-Account-Token. QA Council hat ein schreibgeschütztes Root-Dateisystem und schreibt ausschließlich nach `/data`. Tika erhält ein flüchtiges `/tmp`.
+Beide Container laufen ohne privilegierte Rechte und ohne Service-Account-Token. QA Council hat ein schreibgeschütztes Root-Dateisystem und schreibt dauerhaft ausschließlich nach `/data`; für Chromium steht ein flüchtiges `/tmp` bereit. Tika erhält ebenfalls ein eigenes flüchtiges `/tmp`.
 
 ## Infisical
 

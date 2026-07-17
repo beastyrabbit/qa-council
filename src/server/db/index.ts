@@ -26,14 +26,20 @@ CREATE INDEX IF NOT EXISTS chunks_document_idx ON document_chunks(document_id, p
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
   provider TEXT NOT NULL, model TEXT NOT NULL, mode TEXT NOT NULL, resolved_mode TEXT,
-  presentation TEXT NOT NULL, focus TEXT, status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0,
-  current_stage TEXT, error TEXT, created_at TEXT NOT NULL, completed_at TEXT
+  presentation TEXT NOT NULL, image_provider TEXT, focus TEXT, status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0,
+  current_stage TEXT, error TEXT, created_at TEXT NOT NULL, completed_at TEXT, archived_at TEXT,
+  comparison_id TEXT
+);
+CREATE TABLE IF NOT EXISTS comparisons (
+  id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  mode TEXT NOT NULL, presentation TEXT NOT NULL, focus TEXT, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS run_stages (
   id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
   name TEXT NOT NULL, role TEXT, status TEXT NOT NULL, prompt_hash TEXT,
   input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
-  cost_micros INTEGER NOT NULL DEFAULT 0, started_at TEXT NOT NULL, completed_at TEXT
+  cost_micros INTEGER NOT NULL DEFAULT 0, thinking_text TEXT NOT NULL DEFAULT '',
+  output_text TEXT NOT NULL DEFAULT '', started_at TEXT NOT NULL, completed_at TEXT
 );
 CREATE TABLE IF NOT EXISTS run_questions (
   id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
@@ -53,14 +59,35 @@ CREATE INDEX IF NOT EXISTS events_run_idx ON events(run_id, id);
 CREATE TABLE IF NOT EXISTS presentations (
   id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
   kind TEXT NOT NULL, title TEXT NOT NULL, html TEXT NOT NULL, source_artifact_id TEXT NOT NULL,
-  created_at TEXT NOT NULL, UNIQUE(run_id, kind)
+  pages_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, UNIQUE(run_id, kind)
 );
+CREATE TABLE IF NOT EXISTS generated_images (
+  id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL, prompt TEXT NOT NULL, remote_prompt_id TEXT,
+  mime_type TEXT NOT NULL, data BLOB NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS generated_images_run_idx ON generated_images(run_id, created_at);
 CREATE TABLE IF NOT EXISTS provider_settings (
   provider TEXT PRIMARY KEY, model TEXT NOT NULL, base_url TEXT, encrypted_api_key TEXT,
   updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `);
+
+function addColumnIfMissing(table: string, column: string, definition: string) {
+  const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!columns.some((item) => item.name === column)) {
+    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+addColumnIfMissing("runs", "archived_at", "TEXT");
+addColumnIfMissing("runs", "image_provider", "TEXT");
+addColumnIfMissing("runs", "comparison_id", "TEXT");
+addColumnIfMissing("presentations", "pages_json", "TEXT NOT NULL DEFAULT '[]'");
+addColumnIfMissing("run_stages", "thinking_text", "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing("run_stages", "output_text", "TEXT NOT NULL DEFAULT ''");
+sqlite.exec("CREATE INDEX IF NOT EXISTS runs_comparison_idx ON runs(comparison_id, created_at)");
 
 const now = new Date().toISOString();
 const insertProvider = sqlite.prepare(`
@@ -78,5 +105,17 @@ insertProvider.run(
 sqlite
   .prepare("INSERT OR IGNORE INTO app_settings(key, value) VALUES ('automaticLanguage', 'true')")
   .run();
+sqlite
+  .prepare(
+    "INSERT OR IGNORE INTO app_settings(key, value) VALUES ('openRouterRouting', 'balanced')",
+  )
+  .run();
+sqlite.prepare("INSERT OR IGNORE INTO app_settings(key, value) VALUES ('comfyUiConfig', ?)").run(
+  JSON.stringify({
+    enabled: false,
+    baseUrl: process.env.COMFYUI_URL ?? "http://192.168.10.120:8188",
+    checkpoint: process.env.COMFYUI_CHECKPOINT ?? "anima-base-v1.0.safetensors",
+  }),
+);
 
 export const db = drizzle(sqlite, { schema });

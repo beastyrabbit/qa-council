@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>QA Council</title>
+  <rect width="64" height="64" rx="12" fill="#8b3f2d"/>
+  <text x="32" y="40" fill="#f8f5ed" font-family="Georgia, serif" font-size="25" font-weight="700" text-anchor="middle">QC</text>
+</svg>
