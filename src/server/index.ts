@@ -158,7 +158,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   app.get("/api/health", async () => ({
     ok: true,
-    version: "0.3.2",
+    version: "0.4.0",
     schemaVersion: SCHEMA_VERSION,
   }));
 
@@ -565,7 +565,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
                AND c.inherited_from_attempt = e.attempt_no
                AND c.phase = CASE
                  WHEN s.name = 'Dokumentextraktion' THEN 'extraction'
-                 WHEN s.name LIKE 'Belegkarte %' THEN 'evidence'
+                 WHEN s.name = 'Dokumentweite Voranalyse' OR s.name LIKE 'Belegkarte %'
+                   THEN 'evidence'
                  WHEN s.name LIKE 'QA-Architekt · RACI-Routing%' THEN 'routing-raci'
                  WHEN s.name LIKE 'Einzelreview · %' THEN 'role-reviews'
                  WHEN s.name LIKE 'Cross-Review · %' THEN 'peer-reviews-ranking'
@@ -626,7 +627,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
                AND c.inherited_from_attempt = s.attempt_no
                AND c.phase = CASE
                  WHEN s.name = 'Dokumentextraktion' THEN 'extraction'
-                 WHEN s.name LIKE 'Belegkarte %' THEN 'evidence'
+                 WHEN s.name = 'Dokumentweite Voranalyse' OR s.name LIKE 'Belegkarte %'
+                   THEN 'evidence'
                  WHEN s.name LIKE 'QA-Architekt · RACI-Routing%' THEN 'routing-raci'
                  WHEN s.name LIKE 'Einzelreview · %' THEN 'role-reviews'
                  WHEN s.name LIKE 'Cross-Review · %' THEN 'peer-reviews-ranking'
@@ -775,7 +777,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
                AND c.inherited_from_attempt = e.attempt_no
                AND c.phase = CASE
                  WHEN s.name = 'Dokumentextraktion' THEN 'extraction'
-                 WHEN s.name LIKE 'Belegkarte %' THEN 'evidence'
+                 WHEN s.name = 'Dokumentweite Voranalyse' OR s.name LIKE 'Belegkarte %'
+                   THEN 'evidence'
                  WHEN s.name LIKE 'QA-Architekt · RACI-Routing%' THEN 'routing-raci'
                  WHEN s.name LIKE 'Einzelreview · %' THEN 'role-reviews'
                  WHEN s.name LIKE 'Cross-Review · %' THEN 'peer-reviews-ranking'

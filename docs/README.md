@@ -14,7 +14,7 @@ QA Council ist eine Webanwendung für nachvollziehbare, mehrstufige Qualitätspr
 
 ## Kernprinzipien
 
-1. **Keine stillen Auslassungen:** Jede Quelldatei und jeder Dokument-Chunk erhält einen Hash und einen nachvollziehbaren Verarbeitungsnachweis. Rollen-Agenten prüfen die vollständigen Originalchunks; Retrieval-Hinweise ersetzen nie die Quelle.
+1. **Keine stillen Auslassungen:** Jede Quelldatei und jeder Dokument-Chunk erhält einen Hash und einen nachvollziehbaren Verarbeitungsnachweis. Bei großen Dokumenten erhält jeder Rollen-Agent sämtliche quelltreuen Chunk-Zusammenfassungen in Originalreihenfolge; Retrieval-Hinweise ersetzen nie die Quelle.
 2. **Kanonisches Ergebnis zuerst:** Die Präsentationsform beeinflusst die fachliche Prüfung nicht.
 3. **Rollen bleiben getrennt:** Einzelreviews werden isoliert erzeugt, bevor Cross-Reviews oder Debatten stattfinden.
 4. **Ground-or-Ask:** Fehlt eine zwingend notwendige Grundlage, hält der Lauf an und fordert eine Antwort an.

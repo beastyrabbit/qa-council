@@ -67,14 +67,16 @@ docs/                      Projektdokumentation
    dokumenthashbasierter `sqlite-vec`-Cache verwendet. Ist das Embedding-Modell nicht erreichbar,
    bleibt die exakte und strukturelle Analyse verfügbar.
 9. Die Voranalyse erzeugt ausschließlich Such- und Navigationshinweise: mögliche RACI-Aktivitäten,
-   betroffene Rollen, repräsentative Originalauszüge und dokumentweite Chunk-Beziehungen. Sie ist
-   weder Fachreview noch Quelle.
+   betroffene Rollen, kompakte extraktive Chunk-Zusammenfassungen aus mehreren unveränderten
+   Originalauszügen und dokumentweite Chunk-Beziehungen. Sie ist weder Fachreview noch Quelle.
 10. Der QA-Architekt erstellt daraus und aus dem vollständigen Coverage-Manifest den
-    matrixgebundenen Ausführungsplan. Jede eingeladene Fachrolle analysiert anschließend jeden
-    Originalchunk selbst. Keine RACI- oder Vektorwertung darf einen Chunk aus dem Rollenreview
-    ausschließen.
-11. Rolleninterne Zusammenführungen prüfen das dokumentweite Beziehungsmanifest gegen die
-    Originalbefunde. Eine chunkübergreifende Aussage muss alle beteiligten Locator nennen.
+    matrixgebundenen Ausführungsplan. Für jede eingeladene Fachrolle wird aus allen
+    Chunk-Zusammenfassungen in Originalreihenfolge, ihrem RACI-Mandat und den dokumentweiten
+    Beziehungen genau ein Rollenbriefing gebaut. Keine RACI- oder Vektorwertung darf einen Chunk
+    daraus ausschließen.
+11. Jede Fachrolle erzeugt genau ein isoliertes Review des vollständigen Dokuments; es gibt keine
+    Modellstufe pro Rolle und Chunk und keinen nachgelagerten Merge von Teilreviews. Eine
+    chunkübergreifende Aussage muss alle beteiligten Locator nennen.
 12. Ein Lauf referenziert Dokument, Provider, Modell, Council-Modus, Fokus und gewünschte erste Darstellung.
 13. Der Orchestrator erzeugt Stufen, Events und virtuelle Artefakte.
 14. Nach der Synthese wird das kanonische finale Markdown gespeichert.
@@ -159,3 +161,5 @@ Provider-Keys werden mit AES-256-GCM verschlüsselt. Ohne gesetzten `SETTINGS_EN
 - Systemprompts werden ausschließlich aus hash-geprüften Projektquellen erzeugt.
 - Tageszeitung und Visual Report werden vom Report-Designer direkt als HTML erzeugt. Der Server entfernt vor der Speicherung alle nicht erlaubten Tags und Attribute und ergänzt nur Navigation, stabile URLs und PDF-Hooks.
 - Versteckte Thinking-Deltas werden aus dem Ereignisprotokoll ausgeschlossen.
+- Die Ablaufgrafik der Laufdetailseite leitet ihre Phasen und Parallelspuren ausschließlich aus
+  `run_stages` ab. Ein ausgewählter Knoten filtert das echte Activity-Protokoll per `stageId`.

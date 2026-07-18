@@ -7,7 +7,7 @@ import {
   embedWithAiBox,
   listAiBoxEmbeddingModels,
   type RetrievalChunk,
-  roleChunkNavigation,
+  roleDocumentBriefing,
   splitRetrievalPassages,
 } from "./retrieval.js";
 
@@ -205,7 +205,7 @@ describe("hybride Dokumentretrieval", () => {
     ).toEqual({ count: 3 });
   });
 
-  it("kennzeichnet Hinweise für Rollen ausdrücklich als unverbindlich", async () => {
+  it("baut ein einziges dokumentweites Rollenbriefing in Originalreihenfolge", async () => {
     const chunks = seed();
     const dossier = await withDatabase(testDatabase(), () =>
       buildRetrievalDossier({
@@ -214,8 +214,16 @@ describe("hybride Dokumentretrieval", () => {
         embed: async (inputs) => inputs.map((input) => deterministicEmbedding(input)),
       }),
     );
-    const navigation = roleChunkNavigation(dossier, chunks[0] as RetrievalChunk, new Set(["2.1"]));
-    expect(navigation).toContain("UNVERBINDLICHE NAVIGATIONSHINWEISE");
-    expect(navigation).toContain("Arbeite ausschließlich am nachfolgenden Originalchunk");
+    const briefing = roleDocumentBriefing(dossier, "Test-Manager", new Set(["2.1"]));
+    expect(briefing).toContain("genau **ein** Review für das vollständige Dokument");
+    expect(briefing).toContain("Quelltreue Chunk-Zusammenfassung");
+    expect(briefing).toContain("nur Navigation, keine Befunde");
+    expect(briefing).toContain("2.1");
+    expect(briefing.indexOf(`## Chunk 1/3 · ${chunks[0]?.locator}`)).toBeLessThan(
+      briefing.indexOf(`## Chunk 2/3 · ${chunks[1]?.locator}`),
+    );
+    expect(briefing.indexOf(`## Chunk 2/3 · ${chunks[1]?.locator}`)).toBeLessThan(
+      briefing.indexOf(`## Chunk 3/3 · ${chunks[2]?.locator}`),
+    );
   });
 });

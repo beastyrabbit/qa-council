@@ -7,11 +7,13 @@ QA Council prüft hochgeladene Dokumente mit einem nachvollziehbaren Multi-Rolle
 - sofortiger Upload ohne Vorabextraktion; sichtbare, resumierbare Seitenextraktion als erster
   Lauf-Schritt mit Tika, PDF-Layout, Codex-Bildbeschreibung und Hash-Cache
 - lückenlose Original-Chunk-Verarbeitung mit Locator, Hash und Coverage-Manifest; bei großen
-  Dokumenten ergänzt ein lokaler Hybridindex unverbindliche RACI- und Querverbindungs-Hinweise
+  Dokumenten erzeugt ein lokaler Hybridindex quelltreue Chunk-Zusammenfassungen sowie
+  unverbindliche RACI- und Querverbindungs-Hinweise für genau ein Gesamt-Review je Rolle
 - Anbieterwahl zwischen serverseitigem Codex-OAuth, OpenRouter und lokaler Ollama-kompatibler AI Box
 - Council-Modi Auto, Quick, Standard und Deep
 - Triage/RACI, isolierte Rollenreviews, Cross-Reviews, Debatte und Synthese gemäß den kanonischen Quellen
 - persistentes Detailprotokoll ohne Speicherung versteckter Gedankengänge
+- interaktive Ablaufgrafik mit echten Parallelspuren und agentbezogenem Log per Klick
 - finales Markdown als kanonisches Ergebnis; danach eine sichtbare Report-Design-Modellstufe, die pro Lauf eine individuelle mehrseitige HTML-Tageszeitung und einen diagrammreichen Visual Report von Grund auf erzeugt
 - dokumentbezogene Illustration pro Lauf über OpenAI, ein bildfähiges OpenRouter-Modell oder ComfyUI; stabile Ergebnis-/Unterseiten-URLs und A4-PDF-Export
 - eigene Dokument- und Archivbereiche mit erneutem Prüfen, Archivieren aller abgeschlossenen Läufe und gezieltem Löschen fehlgeschlagener Läufe

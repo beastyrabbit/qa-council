@@ -190,9 +190,9 @@ Ein hohes `*.context_length` in `model_info` ist nur das theoretische Maximum. E
   `qwen3-embedding:8b` ausgewählt ist.
 - `/api/show` muss für das Modell `embedding` in `capabilities` melden.
 - Die konkrete Ursache steht als `embedding_fallback` im Laufprotokoll.
-- Der Lauf bleibt fachlich ausführbar: Originalchunks werden weiterhin vollständig geprüft, nur
-  die semantischen Navigationshinweise fehlen. Exakte Begriffe und Chunk-Nachbarschaften bleiben
-  aktiv.
+- Der Lauf bleibt fachlich ausführbar: Sämtliche extraktiven Chunk-Zusammenfassungen gelangen
+  weiterhin in jedes Rollenbriefing; nur die semantischen Navigationshinweise fehlen. Exakte
+  Begriffe und Chunk-Nachbarschaften bleiben aktiv.
 
 ### Skill-Integritätsfehler
 

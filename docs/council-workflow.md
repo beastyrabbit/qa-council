@@ -34,19 +34,24 @@ fachliche Modellanalyse pro Chunk aus, sondern baut einen dokumentweiten Hybridi
 - lokale AI-Box-Embeddings für Chunks, kleinere offsettreue Passagen und die 37 RACI-Zeilen;
 - mögliche RACI-Aktivitäten und Rollen pro Chunk;
 - semantische und lexikalische Beziehungen auch zwischen weit auseinanderliegenden Chunks;
-- kurze, unveränderte Originalauszüge mit Locator und Chunk-Hash.
+- eine kompakte, extraktive Chunk-Zusammenfassung aus mehreren unveränderten Originalauszügen
+  vom Anfang, aus der Mitte, vom Ende und aus RACI-relevanten Passagen;
+- Locator und Chunk-Hash für jede Zusammenfassung.
 
 Die daraus erzeugten Belegkarten sind ausdrücklich nur Such- und Navigationshilfen. Sie dürfen
 weder als Fachreview noch als Beleg übernommen werden. Der QA-Architekt prüft ihre Vorschläge
-gegen Originalauszüge und Coverage-Manifest. Danach analysiert jede eingeladene Rolle jeden
-vollständigen Originalchunk in einer isolierten Teilprüfung; die Belegkarte entscheidet nie,
-welcher Text geprüft wird. Die rolleninterne Zusammenführung erhält zusätzlich das dokumentweite
-Beziehungsmanifest und muss chunkübergreifende Aussagen mit allen beteiligten Locator belegen.
+gegen Originalauszüge und Coverage-Manifest. Danach erhält jede eingeladene Rolle genau ein
+dokumentweites Briefing. Es enthält sämtliche Chunk-Zusammenfassungen in Originalreihenfolge,
+die direkt zugewiesenen RACI-Aktivitäten, weitere rollenspezifische Hinweise und das
+dokumentweite Beziehungsmanifest. Auf dieser Grundlage erzeugt die Rolle genau ein isoliertes
+Review des vollständigen Dokuments. Es gibt keine Einzelreviews pro Chunk und keinen
+rolleninternen Merge zusätzlicher Teilreviews.
 
 So bleibt beispielsweise eine gleichartige Prioritätsaussage in Chunk 1 und Chunk 20 auffindbar,
-ohne beide Texte vorab zu einem scheinbaren Fachbefund zu verdichten. Embeddings dienen dabei
-ausschließlich der Navigation. Bei deaktiviertem oder nicht erreichbarem Embedding-Modell läuft
-dieselbe Phase mit exakten Begriffen und strukturellen Beziehungen weiter.
+und beide Originalauszüge gelangen gemeinsam in das Rollenbriefing. Weder Embeddings noch
+RACI-Scores werden dabei zu einem scheinbaren Fachbefund verdichtet. Sie dienen ausschließlich
+der Navigation. Bei deaktiviertem oder nicht erreichbarem Embedding-Modell läuft dieselbe Phase
+mit exakten Begriffen und strukturellen Beziehungen weiter.
 
 Jede eingeladene A-, R- oder benötigte C-Rolle erstellt genau ein isoliertes Review. Danach
 bewertet jede Rolle alle fremden, anonymisierten Reviews. `submit_peer_review` enthält nur die
@@ -106,3 +111,10 @@ Das kanonische Markdown besitzt getrennte Abschnitte:
 Tageszeitung und Visual Report erhalten für diese Bereiche eigenständige Seiten. Die normale
 Resultatansicht zeigt nur die finale Synthese. Vollständige Einzelartefakte werden ausschließlich
 im Dateireader geöffnet.
+
+## Laufvisualisierung
+
+Die Laufdetailseite stellt diese zehn Phasen als echte Ablaufgrafik dar. Sequenzielle Stufen und
+Parallelgruppen werden aus den persistierten `run_stages` aufgebaut; die Grafik erfindet keine
+Fortschrittsdaten. Ein Klick auf eine gestartete Stufe filtert das cursorbasierte
+Aktivitätsprotokoll über deren `stageId` und zeigt damit den tatsächlichen Log dieses Agenten.

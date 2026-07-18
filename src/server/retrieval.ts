@@ -5,13 +5,14 @@ import { QA_ROLES, raciCatalog } from "./raci.js";
 import { safeParse } from "./safe-json.js";
 import { sha256 } from "./skills.js";
 
-export const RETRIEVAL_SCHEMA_VERSION = 1;
+export const RETRIEVAL_SCHEMA_VERSION = 2;
 export const EMBEDDING_DIMENSIONS = 4096;
 export const DEFAULT_EMBEDDING_MODEL = "qwen3-embedding:8b";
 
 const PASSAGE_TARGET_CHARS = 1_800;
 const PASSAGE_MIN_CHARS = 700;
 const MAX_EXCERPT_CHARS = 620;
+const SUMMARY_EXCERPTS_PER_CHUNK = 4;
 const RACI_HINTS_PER_CHUNK = 4;
 const NEIGHBORS_PER_CHUNK = 5;
 const EMBEDDING_BATCH_SIZE = 8;
@@ -597,7 +598,7 @@ ${hint.exactTerms.length ? `**Geteilte exakte Begriffe:** ${hint.exactTerms.join
 
 ## Verwendungsregel
 
-Diese Karte ist ausschließlich ein Such- und Navigationsindex. Sie ist kein Fachreview und keine Quelle. Fachliche Befunde müssen durch einen spezialisierten Rollen-Agenten am vollständigen Originalchunk geprüft und mit dessen Locator belegt werden.`,
+Diese Karte ist ausschließlich ein Such- und Navigationsindex. Sie ist kein Fachreview und ersetzt nicht das Dokument. Fachliche Befunde entstehen ausschließlich im dokumentweiten Review eines spezialisierten Rollen-Agenten und müssen mit den gelieferten Originalauszügen und Locator belegt werden. Reicht die extraktive Zusammenfassung dafür nicht aus, gilt Ground-or-Ask.`,
   };
 }
 
@@ -837,6 +838,20 @@ Responsibilities: ${QA_ROLES.map((role) => `${role}=${row.responsibilities[role]
     if (!selectedPassages.length && passagesByChunk.get(chunk.id)?.[0]) {
       selectedPassages.push(passagesByChunk.get(chunk.id)?.[0] as RetrievalPassage);
     }
+    const chunkPassages = passagesByChunk.get(chunk.id) ?? [];
+    const coverageCandidates = [
+      chunkPassages[0],
+      chunkPassages[chunkPassages.length - 1],
+      chunkPassages[Math.floor((chunkPassages.length - 1) / 2)],
+      ...chunkPassages,
+    ].filter((passage): passage is RetrievalPassage => Boolean(passage));
+    for (const passage of coverageCandidates) {
+      if (selectedPassages.length >= SUMMARY_EXCERPTS_PER_CHUNK) break;
+      if (!selectedPassages.some((candidate) => candidate.id === passage.id)) {
+        selectedPassages.push(passage);
+      }
+    }
+    selectedPassages.sort((left, right) => left.startOffset - right.startOffset);
     const exactTerms = [
       ...new Set(
         neighbors.flatMap(
@@ -886,26 +901,48 @@ ${cards.map((card) => card.content).join("\n\n---\n\n")}`;
   };
 }
 
-export function roleChunkNavigation(
-  dossier: RetrievalDossier | undefined,
-  chunk: RetrievalChunk,
+export function roleDocumentBriefing(
+  dossier: RetrievalDossier,
+  role: QaRole,
   activityIds: ReadonlySet<string>,
 ) {
-  const hint = dossier?.chunks.find((candidate) => candidate.chunkId === chunk.id);
-  if (!hint) return "";
-  const matching = hint.activities.filter((activity) => activityIds.has(activity.activityId));
-  const other = hint.activities.filter((activity) => !activityIds.has(activity.activityId));
-  return `UNVERBINDLICHE NAVIGATIONSHINWEISE — niemals als Quelle oder Befund übernehmen:
-- Passende zugewiesene Aktivitäten: ${
-    matching.map((activity) => `${activity.activityId} ${activity.activity}`).join("; ") || "keine"
-  }
-- Weitere vorgeschlagene Aktivitäten: ${
-    other.map((activity) => `${activity.activityId} ${activity.activity}`).join("; ") || "keine"
-  }
-- Dokumentweit verwandte Originalchunks: ${
-    hint.neighbors.map((neighbor) => neighbor.locator).join("; ") || "keine"
-  }
-- Geteilte exakte Begriffe: ${hint.exactTerms.join(", ") || "keine"}
+  const sections = dossier.chunks.map((hint) => {
+    const assigned = hint.activities.filter((activity) => activityIds.has(activity.activityId));
+    const roleRelated = hint.activities.filter(
+      (activity) =>
+        !activityIds.has(activity.activityId) &&
+        (activity.coreRoles.includes(role) || activity.consultantRoles.includes(role)),
+    );
+    const other = hint.activities.filter(
+      (activity) => !assigned.includes(activity) && !roleRelated.includes(activity),
+    );
+    const renderActivities = (activities: RaciHint[]) =>
+      activities.map((activity) => `${activity.activityId} ${activity.activity}`).join("; ") ||
+      "keine";
+    const summaries = hint.excerpts.map((item) => `> ${item}`).join("\n>\n");
+    const neighbors = hint.neighbors
+      .map((neighbor) => `${neighbor.locator} (${neighbor.reasons.join("; ")})`)
+      .join("; ");
 
-Arbeite ausschließlich am nachfolgenden Originalchunk. Wenn die Hinweise falsch sind, korrigiere sie anhand des Originals.`;
+    return `## Chunk ${hint.position + 1}/${dossier.chunks.length} · ${hint.locator}
+
+- **Chunk-Hash:** \`${hint.sha256}\`
+- **Direkt zugewiesene RACI-Aktivitäten:** ${renderActivities(assigned)}
+- **Weitere Hinweise für ${role}:** ${renderActivities(roleRelated)}
+- **Übriger Dokumentkontext:** ${renderActivities(other)}
+- **Verwandte Originalstellen:** ${neighbors || "keine"}
+- **Geteilte exakte Begriffe:** ${hint.exactTerms.join(", ") || "keine"}
+
+### Quelltreue Chunk-Zusammenfassung
+
+${summaries || "> Für diesen Chunk wurde kein kurzer Originalauszug ausgewählt."}`;
+  });
+
+  return `# Dokumentweites Rollenbriefing · ${role}
+
+Erstelle auf Grundlage dieses gesamten Briefings genau **ein** Review für das vollständige Dokument. Die ${dossier.chunks.length} Chunk-Zusammenfassungen stehen in Originalreihenfolge; für jeden Eintrag des Coverage-Manifests ist genau ein Abschnitt vorhanden.
+
+**Quellenregel:** Die Zusammenfassungen bestehen aus kurzen Originalauszügen mit Locator und Hash. RACI-Scores, Rollenhinweise und Beziehungen sind nur Navigation, keine Befunde. Übernimm keine Aussage ungeprüft und nenne bei dokumentweiten Zusammenhängen alle beteiligten Locator.
+
+${sections.join("\n\n---\n\n")}`;
 }

@@ -10,10 +10,11 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
-import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RunDetails, RunEvent } from "../../shared/types";
 import { api } from "../lib/api";
 import { RunStatus as Status } from "./RunStatus";
+import { RunWorkflowGraph } from "./RunWorkflowGraph";
 import { SanitizedMarkdown } from "./SanitizedMarkdown";
 
 import { formatSize, PROVIDER_NAMES } from "./ViewShared";
@@ -77,6 +78,7 @@ export function RunView({
   const [restarting, setRestarting] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [activity, setActivity] = useState<RunEvent[]>([]);
+  const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
   const activityCursorRef = useRef(0);
   const logRef = useRef<HTMLDivElement>(null);
   const terminal = Boolean(
@@ -106,6 +108,7 @@ export function RunView({
     void id;
     activityCursorRef.current = 0;
     setActivity([]);
+    setSelectedStageId(null);
   }, [attempt, id]);
 
   useEffect(() => {
@@ -137,13 +140,20 @@ export function RunView({
     };
   }, [attempt, id, terminal]);
 
+  const selectedStage = details?.stages.find((stage) => stage.id === selectedStageId);
+  const visibleActivity = useMemo(
+    () =>
+      selectedStageId ? activity.filter((item) => item.stageId === selectedStageId) : activity,
+    [activity, selectedStageId],
+  );
+
   useEffect(() => {
-    if (!liveFollow || activity.length === 0) return;
+    if (!liveFollow || visibleActivity.length === 0) return;
     const frame = window.requestAnimationFrame(() => {
       if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [activity, liveFollow]);
+  }, [liveFollow, visibleActivity]);
 
   async function restartFailedRun() {
     if (details?.run.status !== "failed" || details.run.archivedAt) return;
@@ -409,12 +419,23 @@ export function RunView({
             </form>
           )}
 
+          <RunWorkflowGraph
+            stages={details.stages}
+            roles={roles}
+            selectedStageId={selectedStageId}
+            onSelectStage={setSelectedStageId}
+          />
+
           <div className="run-layout">
             <section className="live-console">
               <header>
                 <div>
                   <Terminal size={17} />
-                  <strong>Modellprotokoll</strong>
+                  <strong>
+                    {selectedStage
+                      ? `Protokoll · ${selectedStage.name}`
+                      : "Gesamtes Modellprotokoll"}
+                  </strong>
                   {activeRun && <span className="live-indicator">live</span>}
                 </div>
                 <label>
@@ -427,13 +448,15 @@ export function RunView({
                 </label>
               </header>
               <div className="live-console__stream" ref={logRef}>
-                {activity.length === 0 && (
+                {visibleActivity.length === 0 && (
                   <div className="console-empty">
                     <LoaderCircle className={activeRun ? "spin" : ""} size={18} />
-                    Aktivität wird geladen …
+                    {selectedStage
+                      ? "Für diesen Agenten liegt noch keine Aktivität vor."
+                      : "Aktivität wird geladen …"}
                   </div>
                 )}
-                {activity.map((item) => {
+                {visibleActivity.map((item) => {
                   const data =
                     item.data && typeof item.data === "object"
                       ? (item.data as Record<string, unknown>)

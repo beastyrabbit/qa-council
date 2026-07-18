@@ -45,7 +45,7 @@ function seed() {
 }
 
 describe("buildApp", () => {
-  it("liefert Health 0.3.2 und hält große Inhalte aus der Summary fern", async () => {
+  it("liefert Health 0.4.0 und hält große Inhalte aus der Summary fern", async () => {
     const db = seed();
     app = await buildApp({
       db,
@@ -53,7 +53,7 @@ describe("buildApp", () => {
       services: { enqueueRun: vi.fn(() => true) },
     });
     const health = await app.inject({ method: "GET", url: "/api/health" });
-    expect(health.json()).toEqual({ ok: true, version: "0.3.2", schemaVersion: 4 });
+    expect(health.json()).toEqual({ ok: true, version: "0.4.0", schemaVersion: 4 });
 
     const summary = await app.inject({ method: "GET", url: "/api/runs/run?attempt=1" });
     expect(summary.statusCode).toBe(200);
@@ -297,6 +297,19 @@ describe("buildApp", () => {
        ) VALUES ('coverage', 'run', 1, 'coverage-manifest', 'Coverage',
                  'text/markdown', 'belegt', 'coverage-sha', 'now')`,
     ).run();
+    db.exec(`
+      INSERT INTO run_stages(
+        id, run_id, attempt_no, name, status, started_at, completed_at
+      ) VALUES (
+        'evidence-stage', 'run', 1, 'Dokumentweite Voranalyse', 'completed', 'now', 'now'
+      );
+      INSERT INTO events(
+        run_id, attempt_no, stage_id, type, level, message, created_at
+      ) VALUES (
+        'run', 1, 'evidence-stage', 'stage_completed', 'info',
+        'Dokumentweite Voranalyse abgeschlossen', 'now'
+      );
+    `);
     withDatabase(db, () => {
       completeCheckpoint(run, "extraction");
       completeCheckpoint(run, "evidence", ["coverage"]);
@@ -331,6 +344,28 @@ describe("buildApp", () => {
       expect.objectContaining({
         id: "coverage",
         attemptNo: 2,
+        originAttempt: 1,
+      }),
+    );
+    const summary = await app.inject({
+      method: "GET",
+      url: "/api/runs/run?attempt=2",
+    });
+    expect(summary.json().stages).toContainEqual(
+      expect.objectContaining({
+        id: "evidence-stage",
+        name: "Dokumentweite Voranalyse",
+        originAttempt: 1,
+      }),
+    );
+    const activity = await app.inject({
+      method: "GET",
+      url: "/api/runs/run/activity?attempt=2&afterEventId=0",
+    });
+    expect(activity.json()).toContainEqual(
+      expect.objectContaining({
+        stageId: "evidence-stage",
+        message: "Dokumentweite Voranalyse abgeschlossen",
         originAttempt: 1,
       }),
     );

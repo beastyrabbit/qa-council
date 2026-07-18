@@ -19,6 +19,7 @@ import {
   runPiStage,
 } from "./providers.js";
 import {
+  type CompiledRoleAssignment,
   compileRaciAssignments,
   formatRoleMandates,
   QA_ROLES,
@@ -36,7 +37,7 @@ import {
   buildRetrievalDossier,
   embeddingConfigFingerprint,
   type RetrievalDossier,
-  roleChunkNavigation,
+  roleDocumentBriefing,
 } from "./retrieval.js";
 import { safeParse } from "./safe-json.js";
 import { RunScheduler, type SchedulerLimits } from "./scheduler.js";
@@ -66,9 +67,9 @@ export const PIPELINE_PHASES = [
 export type PipelinePhase = (typeof PIPELINE_PHASES)[number];
 export const PHASE_VERSIONS: Record<PipelinePhase, number> = {
   extraction: 2,
-  evidence: 3,
+  evidence: 4,
   "routing-raci": 2,
-  "role-reviews": 1,
+  "role-reviews": 2,
   "peer-reviews-ranking": 3,
   "joint-review": 1,
   "pro-contra-debate": 1,
@@ -1240,37 +1241,49 @@ export async function settleParallel<T>(
   return settled.map((result) => (result as PromiseFulfilledResult<T>).value);
 }
 
-async function mapParallelBounded<T, R>(
-  items: T[],
-  limit: number,
-  task: (item: T, index: number) => Promise<R>,
-) {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  let failure: unknown;
-  const worker = async () => {
-    while (failure === undefined) {
-      const index = next;
-      next += 1;
-      if (index >= items.length) return;
-      try {
-        results[index] = await task(items[index], index);
-      } catch (error) {
-        failure = error;
-      }
-    }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(Math.max(1, limit), items.length) }, () => worker()),
-  );
-  if (failure !== undefined) throw failure;
-  return results;
-}
-
 function anonymizeReview(content: string) {
   return content
     .replace(/^#\s*Review\s*[—–-]\s*.+$/gim, "# Review")
     .replace(/Reviewer-Rolle:\s*[^|\n]+/gi, "Reviewer-Rolle: anonymisiert");
+}
+
+function roleAssignmentPrompt(assignment: CompiledRoleAssignment, focus: string) {
+  return `Arbeite in einer frischen, vollständig isolierten Sitzung als ${assignment.role}. Andere Reviewer und deren Antworten sind dir nicht bekannt. Erstelle dein Review exakt nach der kanonischen Council-Struktur.
+
+DEIN RACI-AUFTRAG:
+- Gesamtbeteiligung: ${assignment.participation === "full" ? "A/R-Fachreview" : "konsultatives C-Review"}
+
+${formatRoleMandates(assignment)}
+
+Prüfe nur auf belegbarer Grundlage und nenne Locator zu jedem wesentlichen Befund. ${
+    assignment.participation === "full"
+      ? "Kernbefunde sind strikt auf die zugewiesenen A/R-Lanes beschränkt; andere Perspektiven bleiben kurze C-Kommentare."
+      : "Du gibst ausschließlich die benötigte konsultative Perspektive ab, übernimmst kein finales Verdict und eröffnest keine fremden Kernbefunde."
+  } Der KONFIDENZ-Block ist Pflicht.${focus}`;
+}
+
+export function buildLargeDocumentRoleReviewWorkItems(
+  assignments: CompiledRoleAssignment[],
+  dossier: RetrievalDossier,
+  manifest: string,
+  focus = "",
+) {
+  return assignments.map((assignment) => ({
+    role: assignment.role,
+    name: `Einzelreview · ${assignment.role}`,
+    prompt: `${roleAssignmentPrompt(assignment, focus)}
+
+Erstelle genau ein zusammenhängendes Review für das gesamte Dokument. Erzeuge keine separaten Chunk-Reviews. Die chunkweise Voranalyse ist ausschließlich dein dokumentweites, rollenbezogen angereichertes Briefing.
+
+COVERAGE-MANIFEST:
+${manifest}
+
+${roleDocumentBriefing(
+  dossier,
+  assignment.role,
+  new Set(assignment.mandates.map((mandate) => mandate.activityId)),
+)}`,
+  }));
 }
 
 async function buildEvidence(run: RunRow, context: ReturnType<typeof documentContext>) {
@@ -1654,81 +1667,43 @@ Erlaubte Aktivitäts-IDs: ${[...raciCatalog().keys()].join(", ")}`,
         `${selectedRoles.length} isolierte Einzelreviews starten parallel`,
         { group: "role-reviews", count: selectedRoles.length },
       );
+      if (context.text.length > 110_000 && !retrievalDossier) {
+        throw new Error(
+          "Das dokumentweite Rollenbriefing für das große Dokument konnte nicht geladen werden.",
+        );
+      }
+      const largeDocumentWorkItems =
+        context.text.length > 110_000 && retrievalDossier
+          ? buildLargeDocumentRoleReviewWorkItems(
+              assignments,
+              retrievalDossier,
+              context.manifest,
+              focus,
+            )
+          : [];
       reviews = await settleParallel(
         assignments.map((assignment, index) => async (groupSignal) => {
-          const assignmentPrompt = `Arbeite in einer frischen, vollständig isolierten Sitzung als ${assignment.role}. Andere Reviewer und deren Antworten sind dir nicht bekannt. Erstelle dein Review exakt nach der kanonischen Council-Struktur.
+          const workItem = largeDocumentWorkItems.find(
+            (candidate) => candidate.role === assignment.role,
+          );
+          const prompt =
+            workItem?.prompt ??
+            `${roleAssignmentPrompt(assignment, focus)}
 
-DEIN RACI-AUFTRAG:
-- Gesamtbeteiligung: ${assignment.participation === "full" ? "A/R-Fachreview" : "konsultatives C-Review"}
-
-${formatRoleMandates(assignment)}
-
-Prüfe nur auf belegbarer Grundlage und nenne Locator zu jedem wesentlichen Befund. ${
-            assignment.participation === "full"
-              ? "Kernbefunde sind strikt auf die zugewiesenen A/R-Lanes beschränkt; andere Perspektiven bleiben kurze C-Kommentare."
-              : "Du gibst ausschließlich die benötigte konsultative Perspektive ab, übernimmst kein finales Verdict und eröffnest keine fremden Kernbefunde."
-          } Der KONFIDENZ-Block ist Pflicht.${focus}`;
-          if (context.text.length <= 110_000) {
-            return {
-              role: assignment.role,
-              result: await runStage({
-                run,
-                name: `Einzelreview · ${assignment.role}`,
-                role: assignment.role,
-                prompt: `${assignmentPrompt}\n\nVOLLSTÄNDIGES ORIGINALDOKUMENT:\n${context.text}`,
-                progress: 25 + Math.round((index / selectedRoles.length) * 35),
-                kind: "role-review",
-                signal: groupSignal,
-              }),
-            };
-          }
-
-          const partials = await mapParallelBounded(context.chunks, 1, (chunk) =>
-            runStage({
+VOLLSTÄNDIGES ORIGINALDOKUMENT:
+${context.text}`;
+          return {
+            role: assignment.role,
+            result: await runStage({
               run,
-              name: `Einzelreview · ${assignment.role} · Teil ${chunk.position + 1}/${context.chunks.length}`,
+              name: workItem?.name ?? `Einzelreview · ${assignment.role}`,
               role: assignment.role,
-              prompt: `${assignmentPrompt}
-
-Dies ist exakt ein Teil des Originaldokuments. Erstelle ein vollständiges Teilreview nur für diesen Chunk; behalte alle Locator, Gap-IDs, Annahmen und Konfidenzsignale für die spätere rolleninterne Zusammenführung.
-
-${roleChunkNavigation(
-  retrievalDossier,
-  chunk,
-  new Set(assignment.mandates.map((mandate) => mandate.activityId)),
-)}
-
-ORIGINALCHUNK ${chunk.position + 1}/${context.chunks.length}
-LOCATOR: ${chunk.locator}
-SHA256: ${chunk.sha256}
-${chunk.content}`,
-              progress: 25 + Math.round((index / selectedRoles.length) * 30),
-              kind: "role-review-chunk",
+              prompt,
+              progress: 25 + Math.round((index / selectedRoles.length) * 35),
+              kind: "role-review",
               signal: groupSignal,
             }),
-          );
-          const merged = await runStage({
-            run,
-            name: `Einzelreview · ${assignment.role}`,
-            role: assignment.role,
-            prompt: `${assignmentPrompt}
-
-Führe ausschließlich deine eigenen Teilreviews zu genau einem kanonischen Einzelreview zusammen. Jeder Originalchunk muss im Coverage-Abschnitt mit Locator und Hash vorkommen. Entferne keine Minderheits-, Annahme- oder Konfidenzsignale und erfinde nichts.
-
-Die folgenden Beziehungen sind unverbindliche Navigationshinweise. Prüfe jede übergreifende Aussage gegen die Befunde aus den jeweils separat analysierten Originalchunks und zitiere bei einer Chunk-übergreifenden Aussage alle beteiligten Locator.
-
-${retrievalDossier?.relationshipManifest ?? "Keine zusätzlichen Retrieval-Beziehungen vorhanden."}
-
-COVERAGE-MANIFEST:
-${context.manifest}
-
-DEINE TEILREVIEWS:
-${partials.map((partial, partialIndex) => `## Teil ${partialIndex + 1}\n${partial.content}`).join("\n\n")}`,
-            progress: 58,
-            kind: "role-review",
-            signal: groupSignal,
-          });
-          return { role: assignment.role, result: merged };
+          };
         }),
       );
       completeCheckpoint(
