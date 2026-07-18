@@ -43,6 +43,7 @@ describe("Pi-Stage-Ausgabe", () => {
 
   it("klassifiziert Netzwerk, 408, 429 und 5xx als retrybar", () => {
     expect(isRetryableProviderError(new TypeError("fetch failed"))).toBe(true);
+    expect(isRetryableProviderError(new Error("WebSocket error"))).toBe(true);
     expect(
       isRetryableProviderError(Object.assign(new Error("Request Timeout"), { status: 408 })),
     ).toBe(true);
@@ -52,6 +53,24 @@ describe("Pi-Stage-Ausgabe", () => {
     expect(
       isRetryableProviderError(Object.assign(new Error("Service unavailable"), { status: 503 })),
     ).toBe(true);
+  });
+
+  it("fängt einen vorübergehenden WebSocket-Fehler in einer frischen Session ab", async () => {
+    let calls = 0;
+    const retries: number[] = [];
+
+    const result = await withProviderRetries(
+      async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("WebSocket error");
+        return "ok";
+      },
+      { onRetry: (attempt) => retries.push(attempt) },
+    );
+
+    expect(result).toBe("ok");
+    expect(calls).toBe(2);
+    expect(retries).toEqual([1]);
   });
 
   it("wiederholt weder Auth-, Abrechnungs- noch Inferenz-Timeouts", async () => {
