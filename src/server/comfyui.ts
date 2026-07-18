@@ -1,8 +1,8 @@
 import { nanoid } from "nanoid";
 import { sqlite } from "./db/index.js";
 
-const DEFAULT_BASE_URL = process.env.COMFYUI_URL ?? "http://192.168.10.120:8188";
-const DEFAULT_CHECKPOINT = process.env.COMFYUI_CHECKPOINT ?? "anima-base-v1.0.safetensors";
+const DEFAULT_BASE_URL = process.env.COMFYUI_URL?.trim() ?? "";
+const DEFAULT_CHECKPOINT = process.env.COMFYUI_CHECKPOINT?.trim() ?? "";
 const REQUEST_TIMEOUT_MS = 20_000;
 const GENERATION_TIMEOUT_MS = 5 * 60_000;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
@@ -66,8 +66,8 @@ export function getComfyUiConfig(): ComfyUiConfig {
     const parsed = row ? (JSON.parse(row.value) as Partial<ComfyUiConfig>) : {};
     return {
       enabled: parsed.enabled === true,
-      baseUrl: parsed.baseUrl || DEFAULT_BASE_URL,
-      checkpoint: parsed.checkpoint || DEFAULT_CHECKPOINT,
+      baseUrl: parsed.baseUrl ?? DEFAULT_BASE_URL,
+      checkpoint: parsed.checkpoint ?? DEFAULT_CHECKPOINT,
     };
   } catch {
     return {
@@ -79,10 +79,17 @@ export function getComfyUiConfig(): ComfyUiConfig {
 }
 
 export function saveComfyUiConfig(config: ComfyUiConfig) {
+  const baseUrl = config.baseUrl.trim();
+  const checkpoint = config.checkpoint.trim();
+  if (config.enabled && (!baseUrl || !checkpoint)) {
+    throw new Error(
+      "Für aktiviertes ComfyUI sind eine Serveradresse und ein Checkpoint erforderlich.",
+    );
+  }
   const normalized = {
     enabled: config.enabled,
-    baseUrl: normalizeBaseUrl(config.baseUrl),
-    checkpoint: config.checkpoint.trim(),
+    baseUrl: baseUrl ? normalizeBaseUrl(baseUrl) : "",
+    checkpoint,
   };
   sqlite
     .prepare(
@@ -392,10 +399,12 @@ export async function getOrCreateEditorialImage(options: {
   const existing = sqlite
     .prepare(
       `SELECT id FROM generated_images
-       WHERE run_id = ? AND provider = 'comfyui' AND slot = ?
+       WHERE run_id = ? AND attempt_no = (
+         SELECT current_attempt FROM runs WHERE id = ?
+       ) AND provider = 'comfyui' AND slot = ?
        ORDER BY created_at DESC LIMIT 1`,
     )
-    .get(options.runId, slot) as { id: string } | undefined;
+    .get(options.runId, options.runId, slot) as { id: string } | undefined;
   if (existing) {
     options.onEvent?.({
       type: "image_generation_reused",
@@ -422,15 +431,21 @@ export async function getOrCreateEditorialImage(options: {
     onEvent: options.onEvent,
   });
   const id = nanoid();
+  const run = sqlite
+    .prepare("SELECT current_attempt FROM runs WHERE id = ?")
+    .get(options.runId) as {
+    current_attempt: number;
+  };
   sqlite
     .prepare(
       `INSERT INTO generated_images(
-        id, run_id, provider, prompt, remote_prompt_id, slot, mime_type, data, created_at
-       ) VALUES (?, ?, 'comfyui', ?, ?, ?, ?, ?, ?)`,
+        id, run_id, attempt_no, provider, prompt, remote_prompt_id, slot, mime_type, data, created_at
+       ) VALUES (?, ?, ?, 'comfyui', ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
       options.runId,
+      run.current_attempt,
       prompt,
       generated.remotePromptId,
       slot,

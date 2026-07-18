@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { createPresentation, markdownHtml, reportDesignerPrompt } from "./presentation.js";
+import {
+  createPresentation,
+  finalSynthesisMarkdown,
+  markdownHtml,
+  reportDesignerPrompt,
+  splitNewspaperSections,
+} from "./presentation.js";
 
 describe("Markdown-Ausgabe", () => {
+  it("reduziert die Resultatansicht auf die finale Synthese", () => {
+    expect(
+      finalSynthesisMarkdown(
+        "# Ergebnis\n\n## Finale Synthese\n\nEntscheidung.\n\n## Triage und RACI\n\nIntern.",
+      ),
+    ).toBe("# Ergebnis\n\n## Finale Synthese\n\nEntscheidung.\n");
+  });
   it("formatiert Modelltext und entfernt aktive oder unsichere Inhalte", () => {
     const html = markdownHtml(
       '# Titel\n\n- **Punkt**\n\n<script>alert(1)</script><a href="javascript:alert(1)" onclick="alert(1)">unsicher</a><a href="//evil.test">relativ</a>',
@@ -29,7 +42,7 @@ Diese Überschrift ist keine eigene Zeitungsroute.
 
 Diese modellinterne Überschrift darf die spätere kanonische Seite nicht duplizieren.
 
-## Triage, Scope und RACI
+## Triage und RACI
 
 Security ist verantwortlich.
 
@@ -51,6 +64,63 @@ const reportPackage = `<report-package>
 </report-package>`;
 
 describe("Report-Designer-Ausgaben", () => {
+  it("behält alle Auditsektionen als getrennte Newspaper-Seiten", async () => {
+    const auditMarkdown = `# Ergebnis
+
+## Finale Synthese
+Synthese.
+## Triage und RACI
+Triage.
+## Isolierte Einzelreviews
+Einzelreviews.
+## Cross-Reviews
+Cross-Reviews.
+## Gemeinsames Review
+Gemeinsames Review.
+## Debattenprotokoll
+Debatte.
+## Council-Runden
+Council.
+## Dissent-Audit
+Dissens.
+## Abdeckungsmanifest
+Nachweis.`;
+    const expectedSlugs = [
+      "synthese",
+      "triage",
+      "fachreviews",
+      "cross-reviews",
+      "gemeinsames-review",
+      "debatte",
+      "council-runden",
+      "dissent-audit",
+      "nachweis",
+    ];
+
+    const sections = splitNewspaperSections(auditMarkdown);
+    expect(sections.map((section) => section.slug)).toEqual(expectedSlugs);
+    const completeReportPackage = `<report-package>
+      <image-brief>Audit sections</image-brief>
+      <newspaper>
+        <front><article><h1>Audit</h1></article></front>
+        ${sections
+          .map(
+            (section) =>
+              `<page slug="${section.slug}" title="${section.title}"><article><h1>${section.title}</h1><p>${section.markdown}</p></article></page>`,
+          )
+          .join("\n")}
+      </newspaper>
+      <onepaper><section><h1>Audit</h1></section></onepaper>
+    </report-package>`;
+    const result = await createPresentation({
+      kind: "newspaper",
+      finalMarkdown: auditMarkdown,
+      reportPackage: completeReportPackage,
+      documentName: "audit.md",
+    });
+    expect(result.pages?.map((page) => page.slug)).toEqual(expectedSlugs);
+  });
+
   it("fordert beide direkten HTML-Ausgaben mit dokumentbezogenem Bildbriefing an", () => {
     const prompt = reportDesignerPrompt({
       finalMarkdown,

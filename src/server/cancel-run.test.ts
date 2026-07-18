@@ -6,7 +6,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const dataDir = mkdtempSync(path.join(tmpdir(), "qa-council-cancel-"));
 process.env.DATA_DIR = dataDir;
 
-const { sqlite } = await import("./db/index.js");
+const { createDatabase, setDefaultDatabase } = await import("./db/index.js");
+const sqlite = createDatabase();
+setDefaultDatabase(sqlite);
 const { cancelRun, enqueueRun } = await import("./orchestrator.js");
 
 function insertRun(id: string, status: string) {
@@ -34,6 +36,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  setDefaultDatabase(undefined);
   sqlite.close();
   rmSync(dataDir, { recursive: true, force: true });
 });

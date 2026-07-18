@@ -37,16 +37,22 @@ function storeImage(options: {
   data: Buffer;
   remotePromptId?: string;
 }) {
+  const run = sqlite
+    .prepare("SELECT current_attempt FROM runs WHERE id = ?")
+    .get(options.runId) as {
+    current_attempt: number;
+  };
   const id = nanoid();
   sqlite
     .prepare(
       `INSERT INTO generated_images(
-        id, run_id, provider, prompt, remote_prompt_id, slot, mime_type, data, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, run_id, attempt_no, provider, prompt, remote_prompt_id, slot, mime_type, data, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
       options.runId,
+      run.current_attempt,
       options.provider,
       options.prompt,
       options.remotePromptId ?? null,
@@ -184,7 +190,9 @@ export async function getOrCreateRunImage(options: {
   const slot = options.slot ?? "hero";
   const existing = sqlite
     .prepare(
-      "SELECT id, provider FROM generated_images WHERE run_id = ? AND slot = ? ORDER BY created_at LIMIT 1",
+      `SELECT g.id, g.provider FROM generated_images g JOIN runs r ON r.id = g.run_id
+       WHERE g.run_id = ? AND g.attempt_no = r.current_attempt AND g.slot = ?
+       ORDER BY g.created_at LIMIT 1`,
     )
     .get(options.runId, slot) as { id: string; provider: string } | undefined;
   if (existing) {

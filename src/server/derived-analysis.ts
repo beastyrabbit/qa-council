@@ -12,6 +12,7 @@ type DerivedAnalysisStatus = DerivedAnalysisRecord["status"];
 interface DerivedAnalysisRow {
   id: string;
   run_id: string;
+  attempt_no: number;
   kind: string;
   status: DerivedAnalysisStatus;
   provider: ProviderId;
@@ -42,6 +43,7 @@ interface RunConfiguration {
   id: string;
   provider: ProviderId;
   model: string;
+  current_attempt: number;
 }
 
 export interface StartDerivedAnalysisInput {
@@ -72,7 +74,11 @@ export interface DerivedAnalysisServiceDependencies {
 export interface DerivedAnalysisService {
   start(input: StartDerivedAnalysisInput): StartDerivedAnalysisResult;
   get(id: string): DerivedAnalysisRecord | null;
-  getLatest(runId: string, kind?: typeof TOP10_ANALYSIS_KIND): DerivedAnalysisRecord | null;
+  getLatest(
+    runId: string,
+    kind?: typeof TOP10_ANALYSIS_KIND,
+    attemptNo?: number,
+  ): DerivedAnalysisRecord | null;
   cancel(id: string): CancelDerivedAnalysisResult;
   waitFor(id: string): Promise<DerivedAnalysisRecord | null>;
   subscribe(id: string, listener: (job: DerivedAnalysisRecord) => void): () => void;
@@ -115,6 +121,7 @@ function toRecord(row: DerivedAnalysisRow): DerivedAnalysisRecord {
   return {
     id: row.id,
     runId: row.run_id,
+    attemptNo: row.attempt_no,
     kind: TOP10_ANALYSIS_KIND,
     status: row.status,
     provider: row.provider,
@@ -433,26 +440,28 @@ export function createDerivedAnalysisService(
     }
     const result = database.transaction(() => {
       const run = database
-        .prepare("SELECT id, provider, model FROM runs WHERE id = ?")
+        .prepare("SELECT id, provider, model, current_attempt FROM runs WHERE id = ?")
         .get(input.runId) as RunConfiguration | undefined;
       if (!run) throw new Error(`Lauf ${input.runId} wurde nicht gefunden.`);
 
       const existing = database
         .prepare(
           `SELECT * FROM derived_analyses
-           WHERE run_id = ? AND kind = ? AND status IN ('queued', 'running')
+           WHERE run_id = ? AND attempt_no = ? AND kind = ? AND status IN ('queued', 'running')
            ORDER BY created_at DESC LIMIT 1`,
         )
-        .get(input.runId, TOP10_ANALYSIS_KIND) as DerivedAnalysisRow | undefined;
+        .get(input.runId, run.current_attempt, TOP10_ANALYSIS_KIND) as
+        | DerivedAnalysisRow
+        | undefined;
       if (existing) return { row: existing, reused: true };
 
       const final = database
         .prepare(
           `SELECT id, kind, title, content, sha256
-           FROM artifacts WHERE run_id = ? AND kind = 'final'
+           FROM artifacts WHERE run_id = ? AND attempt_no = ? AND kind = 'final'
            ORDER BY created_at DESC LIMIT 1`,
         )
-        .get(input.runId) as
+        .get(input.runId, run.current_attempt) as
         | {
             id: string;
             kind: "final";
@@ -468,10 +477,10 @@ export function createDerivedAnalysisService(
           `SELECT a.id, a.kind, a.title, a.content, a.sha256, s.role
            FROM artifacts a
            LEFT JOIN run_stages s ON s.id = a.stage_id
-           WHERE a.run_id = ? AND a.kind = 'role-review'
+           WHERE a.run_id = ? AND a.attempt_no = ? AND a.kind = 'role-review'
            ORDER BY a.created_at, a.id`,
         )
-        .all(input.runId) as Array<{
+        .all(input.runId, run.current_attempt) as Array<{
         id: string;
         kind: "role-review";
         title: string;
@@ -503,13 +512,14 @@ export function createDerivedAnalysisService(
       database
         .prepare(
           `INSERT INTO derived_analyses(
-             id, run_id, kind, status, provider, model, source_artifact_id,
+             id, run_id, attempt_no, kind, status, provider, model, source_artifact_id,
              source_refs_json, thinking_text, output_text, error, created_at
-           ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, '', '', NULL, ?)`,
+           ) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, '', '', NULL, ?)`,
         )
         .run(
           id,
           input.runId,
+          run.current_attempt,
           TOP10_ANALYSIS_KIND,
           input.provider ?? run.provider,
           input.model ?? run.model,
@@ -530,13 +540,22 @@ export function createDerivedAnalysisService(
   return {
     start,
     get,
-    getLatest(runId, kind = TOP10_ANALYSIS_KIND) {
+    getLatest(runId, kind = TOP10_ANALYSIS_KIND, attemptNo) {
+      const selectedAttempt =
+        attemptNo ??
+        (
+          database.prepare("SELECT current_attempt FROM runs WHERE id = ?").get(runId) as
+            | { current_attempt: number }
+            | undefined
+        )?.current_attempt;
+      if (!selectedAttempt) return null;
       const row = database
         .prepare(
           `SELECT * FROM derived_analyses
-           WHERE run_id = ? AND kind = ? ORDER BY created_at DESC LIMIT 1`,
+           WHERE run_id = ? AND attempt_no = ? AND kind = ?
+           ORDER BY created_at DESC LIMIT 1`,
         )
-        .get(runId, kind) as DerivedAnalysisRow | undefined;
+        .get(runId, selectedAttempt, kind) as DerivedAnalysisRow | undefined;
       return row ? toRecord(row) : null;
     },
     cancel(id) {
@@ -584,8 +603,9 @@ export function getDerivedAnalysis(id: string) {
 export function getLatestDerivedAnalysis(
   runId: string,
   kind: typeof TOP10_ANALYSIS_KIND = TOP10_ANALYSIS_KIND,
+  attemptNo?: number,
 ) {
-  return defaultService.getLatest(runId, kind);
+  return defaultService.getLatest(runId, kind, attemptNo);
 }
 
 export function cancelDerivedAnalysis(id: string) {

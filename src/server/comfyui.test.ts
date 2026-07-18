@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildComfyUiWorkflow, editorialImagePrompt } from "./comfyui.js";
+import {
+  buildComfyUiWorkflow,
+  editorialImagePrompt,
+  getComfyUiConfig,
+  saveComfyUiConfig,
+} from "./comfyui.js";
+import { createDatabase, withDatabase } from "./db/index.js";
 
 const baseOptions = {
   prompt: "Editorial quality report",
@@ -52,5 +58,28 @@ describe("ComfyUI workflow", () => {
     expect(prompt).toContain("Release 42");
     expect(prompt).not.toContain("**");
     expect(prompt.length).toBeLessThan(1_700);
+  });
+
+  it("akzeptiert eine leere optionale Konfiguration nur im deaktivierten Zustand", () => {
+    const database = createDatabase(":memory:");
+    try {
+      withDatabase(database, () => {
+        expect(saveComfyUiConfig({ enabled: false, baseUrl: "", checkpoint: "" })).toEqual({
+          enabled: false,
+          baseUrl: "",
+          checkpoint: "",
+        });
+        expect(getComfyUiConfig()).toEqual({
+          enabled: false,
+          baseUrl: "",
+          checkpoint: "",
+        });
+        expect(() => saveComfyUiConfig({ enabled: true, baseUrl: "", checkpoint: "" })).toThrow(
+          "Serveradresse und ein Checkpoint",
+        );
+      });
+    } finally {
+      database.close();
+    }
   });
 });

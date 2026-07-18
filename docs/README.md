@@ -37,7 +37,9 @@ persistiert und per Dokument-Hash wiederverwendet. Die initiale Uploadgrenze bet
 ## Ergebnisse
 
 - **HTML / Nur Text:** vollständiges, bereinigtes HTML des finalen Markdown-Ergebnisses; das Markdown kann heruntergeladen werden.
-- **QA-Tageszeitung:** laute redaktionelle Titelseite plus eigenständige Ressortseiten.
-- **Visual Report:** scrollbare HTML-Publikation mit belegten Diagrammen, Prozessbildern, Matrizen und PDF-Export.
+- **QA-Tageszeitung:** ruhige, warme „Velvet Green Room“-Titelseite plus eigenständige
+  Ressortseiten im flaschengrünen Papier-/Messing-Design.
+- **Visual Report:** warme „Group Chat“-Publikation mit belegten Gesprächsbubbles,
+  Prozessbildern, Matrizen, nächsten Schritten und PDF-Export.
 
 Weitere Darstellungen können nach einem abgeschlossenen Lauf erzeugt werden, ohne den Council erneut auszuführen.

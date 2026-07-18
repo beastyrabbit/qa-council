@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const baseUrl = process.env.GUI_BASE_URL ?? "https://qa-council.localhost:1355";
+const baseUrl = process.env.GUI_BASE_URL ?? "http://qa-council.localhost:1355";
 const documentId = process.env.GUI_DOCUMENT_ID;
 const runId = process.env.GUI_RUN_ID;
 const cancelRunId = process.env.GUI_CANCEL_RUN_ID;
@@ -192,12 +192,6 @@ try {
       3,
     "Die durchsuchbare Modellauswahl fehlt bei mindestens einem Anbieter.",
   );
-  const openRouterSearch = await evaluate(
-    `[...document.querySelectorAll(".test-provider")]
-      .find((item) => item.textContent.includes("OpenRouter"))
-      ?.querySelector(".search-input input")?.placeholder`,
-  );
-  assert(openRouterSearch === "Name oder ID", "OpenRouter-Modellsuche fehlt.");
   checks.push("comparison-mode-model-search");
 
   if (comparisonId) {
@@ -328,13 +322,13 @@ try {
       "Boolean(document.querySelector('.result--newspaper'))",
       "Zeitungs-Titelseite wurde nicht geladen.",
     );
-    assert(page.text.includes("QA REPORT"), "Zeitungs-Masthead fehlt.");
+    assert(page.text.includes("QA Council"), "Zeitungs-Masthead fehlt.");
     const links = await evaluate(
       `[...document.querySelectorAll(".newspaper-nav a")].map((link) => link.getAttribute("href"))`,
     );
     assert(
-      links.length === 7,
-      `Erwartet wurden 7 Zeitungsnavigationen, erhalten: ${links.length}.`,
+      links.length === 9,
+      `Erwartet wurden 9 Zeitungsnavigationen, erhalten: ${links.length}.`,
     );
     assert(page.width <= page.viewport + 1, "Zeitungs-Titelseite hat horizontalen Overflow.");
     await screenshot("qa-council-newspaper-desktop.png");

@@ -1,24 +1,39 @@
 import type { ImageContent } from "@earendil-works/pi-ai/compat";
 import { nanoid } from "nanoid";
+import { type TSchema, Type } from "typebox";
+import { z } from "zod";
 import type { CouncilMode, ImageProvider, PresentationKind, ProviderId } from "../shared/types.js";
-import { councilRoundCount, crossReviewPasses } from "./council-plan.js";
-import { sqlite } from "./db/index.js";
+import { aggregatePeerRankings, councilRoundCount, crossReviewPasses } from "./council-plan.js";
+import { currentDatabase, sqlite } from "./db/index.js";
 import { type ExtractedDocument, extractDocument, extractionFingerprint } from "./extract.js";
 import { createPresentationScreenshot } from "./pdf.js";
-import { createPresentation, splitNewspaperSections } from "./presentation.js";
-import { modelSupportsVision, providerRow, runPiStage } from "./providers.js";
+import {
+  createPresentation,
+  finalSynthesisMarkdown,
+  splitNewspaperSections,
+} from "./presentation.js";
+import {
+  modelSupportsVision,
+  probeCouncilToolCapability,
+  providerRow,
+  runPiStage,
+} from "./providers.js";
 import {
   compileRaciAssignments,
   formatRoleMandates,
-  type ProposedActivityRoute,
+  QA_ROLES,
   type QaRole,
+  raciCatalog,
 } from "./raci.js";
 import {
   assembleReportWorkspace,
+  removeReportWorkspace,
   scaffoldReportWorkspace,
   scopeReportCss,
   validateReportWorkspace,
 } from "./report-workspace.js";
+import { safeParse } from "./safe-json.js";
+import { RunScheduler, type SchedulerLimits } from "./scheduler.js";
 import {
   loadCanonicalSkills,
   loadReportDesignSkill,
@@ -26,8 +41,35 @@ import {
   roleSkillFile,
   sha256,
 } from "./skills.js";
+import { SupervisorSubmissionError, validateSingleSubmission } from "./structured-submit.js";
 
 type Role = QaRole;
+
+export const PIPELINE_PHASES = [
+  "extraction",
+  "evidence",
+  "routing-raci",
+  "role-reviews",
+  "peer-reviews-ranking",
+  "joint-review",
+  "pro-contra-debate",
+  "council-rounds",
+  "synthesis-dissent",
+  "reports",
+] as const;
+export type PipelinePhase = (typeof PIPELINE_PHASES)[number];
+export const PHASE_VERSIONS: Record<PipelinePhase, number> = {
+  extraction: 2,
+  evidence: 2,
+  "routing-raci": 2,
+  "role-reviews": 1,
+  "peer-reviews-ranking": 3,
+  "joint-review": 1,
+  "pro-contra-debate": 1,
+  "council-rounds": 1,
+  "synthesis-dissent": 2,
+  reports: 1,
+};
 
 interface RunRow {
   id: string;
@@ -44,11 +86,14 @@ interface RunRow {
   document_status: string;
   document_mime_type: string;
   document_original: Buffer;
+  document_sha256: string;
+  current_attempt: number;
 }
 
 interface StageResult {
   id: string;
   content: string;
+  toolCalls: Array<{ name: string; callId: string; args: unknown }>;
 }
 
 const activeRuns = new Set<string>();
@@ -66,8 +111,280 @@ function now() {
   return new Date().toISOString();
 }
 
+function publicErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+    .replace(
+      /\b(api[_-]?key|token|secret|authorization)\s*[:=]\s*["']?[^"',;\s]+/gi,
+      "$1=[REDACTED]",
+    );
+}
+
 function bindPresentationRoute(value: string, presentationId: string) {
   return value.replaceAll("__RESULT_BASE__", `/results/${presentationId}`);
+}
+
+export function persistPresentation(options: {
+  runId: string;
+  attemptNo: number;
+  kind: PresentationKind;
+  title: string;
+  sourceArtifactId: string;
+  render: (presentationId: string) => { html: string; pagesJson: string };
+}) {
+  const existing = sqlite
+    .prepare("SELECT id FROM presentations WHERE run_id = ? AND attempt_no = ? AND kind = ?")
+    .get(options.runId, options.attemptNo, options.kind) as { id: string } | undefined;
+  const id = existing?.id ?? nanoid();
+  const rendered = options.render(id);
+  sqlite
+    .prepare(
+      `INSERT INTO presentations(
+        id, run_id, attempt_no, kind, title, html, source_artifact_id, pages_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(run_id, attempt_no, kind) DO UPDATE SET
+        title = excluded.title,
+        html = excluded.html,
+        source_artifact_id = excluded.source_artifact_id,
+        pages_json = excluded.pages_json,
+        created_at = excluded.created_at`,
+    )
+    .run(
+      id,
+      options.runId,
+      options.attemptNo,
+      options.kind,
+      options.title,
+      rendered.html,
+      options.sourceArtifactId,
+      rendered.pagesJson,
+      now(),
+    );
+  return id;
+}
+
+function currentAttempt(runId: string) {
+  const row = sqlite.prepare("SELECT current_attempt FROM runs WHERE id = ?").get(runId) as
+    | { current_attempt: number }
+    | undefined;
+  return row?.current_attempt ?? 1;
+}
+
+interface CheckpointRow {
+  phase: PipelinePhase;
+  checkpoint_version: number;
+  input_hash: string;
+  output_refs_json: string;
+  inherited_from_attempt: number | null;
+}
+
+interface PersistedStageResult extends StageResult {
+  name: string;
+  role: Role | null;
+}
+
+function checkpointOriginAttempt(run: RunRow, checkpoint: CheckpointRow) {
+  return checkpoint.inherited_from_attempt ?? run.current_attempt;
+}
+
+function checkpointOutputRefs(checkpoint: CheckpointRow) {
+  return safeParse<string[]>(checkpoint.output_refs_json, []);
+}
+
+function checkpointReferencesExist(
+  run: RunRow,
+  checkpoint: CheckpointRow,
+  checkpointAttempt: number,
+) {
+  const originAttempt = checkpoint.inherited_from_attempt ?? checkpointAttempt;
+  return checkpointOutputRefs(checkpoint).every((reference) => {
+    const row = sqlite
+      .prepare(
+        `SELECT 1 AS found
+         FROM (
+           SELECT id FROM run_stages
+           WHERE id = ? AND run_id = ? AND attempt_no = ?
+           UNION ALL
+           SELECT id FROM artifacts
+           WHERE id = ? AND run_id = ? AND attempt_no = ?
+           UNION ALL
+           SELECT id FROM presentations
+           WHERE id = ? AND run_id = ? AND attempt_no = ?
+         )
+         LIMIT 1`,
+      )
+      .get(
+        reference,
+        run.id,
+        originAttempt,
+        reference,
+        run.id,
+        originAttempt,
+        reference,
+        run.id,
+        originAttempt,
+      ) as { found: 1 } | undefined;
+    return Boolean(row);
+  });
+}
+
+function loadCheckpointStages(run: RunRow, checkpoint: CheckpointRow) {
+  const originAttempt = checkpointOriginAttempt(run, checkpoint);
+  return checkpointOutputRefs(checkpoint)
+    .map((id) => {
+      const row = sqlite
+        .prepare(
+          `SELECT s.id, s.name, s.role, s.output_text, a.metadata
+           FROM run_stages s
+           LEFT JOIN artifacts a
+             ON a.stage_id = s.id
+            AND a.run_id = s.run_id
+            AND a.attempt_no = s.attempt_no
+           WHERE s.id = ? AND s.run_id = ? AND s.attempt_no = ?
+           ORDER BY a.created_at DESC
+           LIMIT 1`,
+        )
+        .get(id, run.id, originAttempt) as
+        | {
+            id: string;
+            name: string;
+            role: Role | null;
+            output_text: string | null;
+            metadata: string | null;
+          }
+        | undefined;
+      if (!row) return undefined;
+      const metadata = safeParse<{ toolCalls?: StageResult["toolCalls"] }>(row.metadata, {});
+      return {
+        id: row.id,
+        name: row.name,
+        role: row.role,
+        content: row.output_text ?? "",
+        toolCalls: Array.isArray(metadata.toolCalls) ? metadata.toolCalls : [],
+      } satisfies PersistedStageResult;
+    })
+    .filter((stage): stage is PersistedStageResult => Boolean(stage));
+}
+
+function announceCheckpointReuse(run: RunRow, phase: PipelinePhase, checkpoint: CheckpointRow) {
+  event(run.id, "checkpoint_reused", `Checkpoint wiederverwendet: ${phase}`, {
+    phase,
+    originAttempt: checkpointOriginAttempt(run, checkpoint),
+  });
+}
+
+function checkpointInputHash(
+  run: RunRow,
+  phase: PipelinePhase,
+  upstream: Array<Pick<CheckpointRow, "phase" | "checkpoint_version" | "input_hash">>,
+) {
+  const phaseIndex = PIPELINE_PHASES.indexOf(phase);
+  const canonicalSkillHashes = Object.fromEntries(
+    Object.entries(loadCanonicalSkills()).map(([filename, content]) => [filename, sha256(content)]),
+  );
+  return sha256(
+    JSON.stringify({
+      document: run.document_sha256,
+      run: {
+        provider: run.provider,
+        model: run.model,
+        mode: run.mode,
+        presentation: run.presentation,
+        imageProvider: run.image_provider,
+        focus: phaseIndex >= PIPELINE_PHASES.indexOf("routing-raci") ? run.focus : undefined,
+      },
+      phase,
+      version: PHASE_VERSIONS[phase],
+      upstream: upstream.map(({ phase: upstreamPhase, checkpoint_version, input_hash }) => ({
+        phase: upstreamPhase,
+        checkpoint_version,
+        input_hash,
+      })),
+      skills: {
+        ...canonicalSkillHashes,
+        ...(phase === "reports"
+          ? { [REPORT_DESIGN_SKILL_FILE]: sha256(loadReportDesignSkill()) }
+          : {}),
+      },
+    }),
+  );
+}
+
+export function validCheckpoints(run: RunRow, attemptNo = run.current_attempt) {
+  const rows = sqlite
+    .prepare(
+      `SELECT phase, checkpoint_version, input_hash, output_refs_json,
+              inherited_from_attempt
+       FROM run_checkpoints WHERE run_id = ? AND attempt_no = ?`,
+    )
+    .all(run.id, attemptNo) as CheckpointRow[];
+  const byPhase = new Map(rows.map((row) => [row.phase, row]));
+  const valid = new Map<PipelinePhase, CheckpointRow>();
+  const upstream: CheckpointRow[] = [];
+  for (const phase of PIPELINE_PHASES) {
+    const row = byPhase.get(phase);
+    if (
+      !row ||
+      row.checkpoint_version !== PHASE_VERSIONS[phase] ||
+      row.input_hash !== checkpointInputHash(run, phase, upstream) ||
+      !checkpointReferencesExist(run, row, attemptNo)
+    ) {
+      break;
+    }
+    valid.set(phase, row);
+    upstream.push(row);
+  }
+  return valid;
+}
+
+export function completeCheckpoint(run: RunRow, phase: PipelinePhase, outputRefs: string[] = []) {
+  const phaseIndex = PIPELINE_PHASES.indexOf(phase);
+  const upstream = sqlite
+    .prepare(
+      `SELECT phase, checkpoint_version, input_hash, output_refs_json,
+              inherited_from_attempt
+       FROM run_checkpoints WHERE run_id = ? AND attempt_no = ?`,
+    )
+    .all(run.id, run.current_attempt)
+    .filter((row) => {
+      const candidate = row as CheckpointRow;
+      return PIPELINE_PHASES.indexOf(candidate.phase) < phaseIndex;
+    })
+    .sort(
+      (left, right) =>
+        PIPELINE_PHASES.indexOf((left as CheckpointRow).phase) -
+        PIPELINE_PHASES.indexOf((right as CheckpointRow).phase),
+    ) as CheckpointRow[];
+  const inputHash = checkpointInputHash(run, phase, upstream);
+  sqlite
+    .prepare(
+      `INSERT INTO run_checkpoints(
+        run_id, attempt_no, phase, checkpoint_version, input_hash,
+        output_refs_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(run_id, attempt_no, phase) DO UPDATE SET
+        checkpoint_version = excluded.checkpoint_version,
+        input_hash = excluded.input_hash,
+        output_refs_json = excluded.output_refs_json,
+        inherited_from_attempt = NULL,
+        created_at = excluded.created_at`,
+    )
+    .run(
+      run.id,
+      run.current_attempt,
+      phase,
+      PHASE_VERSIONS[phase],
+      inputHash,
+      JSON.stringify(outputRefs),
+      now(),
+    );
+  event(run.id, "checkpoint_completed", `Checkpoint abgeschlossen: ${phase}`, {
+    phase,
+    version: PHASE_VERSIONS[phase],
+    inputHash,
+  });
+  return inputHash;
 }
 
 function event(
@@ -80,9 +397,20 @@ function event(
 ) {
   sqlite
     .prepare(
-      "INSERT INTO events(run_id, stage_id, type, level, message, data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      `INSERT INTO events(
+        run_id, attempt_no, stage_id, type, level, message, data, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(runId, stageId ?? null, type, level, message, data ? JSON.stringify(data) : null, now());
+    .run(
+      runId,
+      currentAttempt(runId),
+      stageId ?? null,
+      type,
+      level,
+      message,
+      data ? JSON.stringify(data) : null,
+      now(),
+    );
 }
 
 function artifact(
@@ -93,20 +421,34 @@ function artifact(
   content: string,
   metadata?: unknown,
 ) {
+  const attemptNo = currentAttempt(runId);
+  const contentHash = sha256(content);
+  const logicalKey = `${kind}:${title}`;
+  const existing = sqlite
+    .prepare(
+      `SELECT id FROM artifacts
+       WHERE run_id = ? AND attempt_no = ? AND kind = ? AND logical_key = ? AND sha256 = ?`,
+    )
+    .get(runId, attemptNo, kind, logicalKey, contentHash) as { id: string } | undefined;
+  if (existing) return existing.id;
   const id = nanoid();
   sqlite
     .prepare(
-      `INSERT INTO artifacts(id, run_id, stage_id, kind, title, content_type, content, sha256, metadata, created_at)
-       VALUES (?, ?, ?, ?, ?, 'text/markdown', ?, ?, ?, ?)`,
+      `INSERT INTO artifacts(
+        id, run_id, attempt_no, stage_id, kind, logical_key, title,
+        content_type, content, sha256, metadata, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'text/markdown', ?, ?, ?, ?)`,
     )
     .run(
       id,
       runId,
+      attemptNo,
       stageId,
       kind,
+      logicalKey,
       title,
       content,
-      sha256(content),
+      contentHash,
       metadata ? JSON.stringify(metadata) : null,
       now(),
     );
@@ -177,17 +519,33 @@ async function runStage(options: {
   skillHashes?: Record<string, string>;
   images?: ImageContent[];
   workspaceDir?: string;
-  toolMode?: "read-edit";
+  toolMode?: "read-edit" | "output-tools";
+  outputTools?: Array<{ name: string; description: string; parameters: TSchema }>;
+  signal?: AbortSignal;
 }) {
-  const signal = activeRunControllers.get(options.run.id)?.signal;
+  const runSignal = activeRunControllers.get(options.run.id)?.signal;
+  const signal =
+    runSignal && options.signal
+      ? AbortSignal.any([runSignal, options.signal])
+      : (options.signal ?? runSignal);
   signal?.throwIfAborted();
   const id = nanoid();
   const promptHash = sha256(options.prompt);
   sqlite
     .prepare(
-      "INSERT INTO run_stages(id, run_id, name, role, status, prompt_hash, started_at) VALUES (?, ?, ?, ?, 'running', ?, ?)",
+      `INSERT INTO run_stages(
+        id, run_id, attempt_no, name, role, status, prompt_hash, started_at
+      ) VALUES (?, ?, ?, ?, ?, 'running', ?, ?)`,
     )
-    .run(id, options.run.id, options.name, options.role ?? null, promptHash, now());
+    .run(
+      id,
+      options.run.id,
+      options.run.current_attempt,
+      options.name,
+      options.role ?? null,
+      promptHash,
+      now(),
+    );
   sqlite
     .prepare("UPDATE runs SET current_stage = ?, progress = MAX(progress, ?) WHERE id = ?")
     .run(options.name, options.progress, options.run.id);
@@ -228,19 +586,22 @@ async function runStage(options: {
 
   try {
     const executeModel = () =>
-      runPiStage({
-        provider: options.run.provider,
-        modelId: options.run.model,
-        systemPrompt: options.systemPrompt ?? systemPromptFor(options.role),
-        prompt: options.prompt,
-        images: options.images,
-        workspaceDir: options.workspaceDir,
-        toolMode: options.toolMode,
-        signal,
-        onEvent: (piEvent) =>
-          event(options.run.id, piEvent.type, piEvent.message, piEvent.data, "info", id),
-        onStream: queueStageStream,
-      });
+      runScheduler().withInferenceSlot(options.run.provider, signal, () =>
+        runPiStage({
+          provider: options.run.provider,
+          modelId: options.run.model,
+          systemPrompt: options.systemPrompt ?? systemPromptFor(options.role),
+          prompt: options.prompt,
+          images: options.images,
+          workspaceDir: options.workspaceDir,
+          toolMode: options.toolMode,
+          outputTools: options.outputTools,
+          signal,
+          onEvent: (piEvent) =>
+            event(options.run.id, piEvent.type, piEvent.message, piEvent.data, "info", id),
+          onStream: queueStageStream,
+        }),
+      );
     let result: Awaited<ReturnType<typeof runPiStage>>;
     try {
       result = await executeModel();
@@ -294,6 +655,7 @@ async function runStage(options: {
             sha256(content),
           ]),
         ),
+      toolCalls: result.toolCalls,
     });
     event(
       options.run.id,
@@ -303,16 +665,104 @@ async function runStage(options: {
       "info",
       id,
     );
-    return { id, content: result.content } satisfies StageResult;
+    if (result.content) {
+      event(
+        options.run.id,
+        "assistant_message",
+        options.name,
+        { markdown: result.content, role: options.role ?? null },
+        "info",
+        id,
+      );
+    }
+    return { id, content: result.content, toolCalls: result.toolCalls } satisfies StageResult;
   } catch (error) {
     if (streamTimer) clearTimeout(streamTimer);
     flushStageStream();
     const cancelled = signal?.aborted === true;
+    const message = publicErrorMessage(error);
     sqlite
       .prepare("UPDATE run_stages SET status = ?, completed_at = ? WHERE id = ?")
       .run(cancelled ? "cancelled" : "failed", now(), id);
+    event(
+      options.run.id,
+      cancelled ? "stage_cancelled" : "stage_failed",
+      cancelled ? `${options.name} wurde abgebrochen` : `${options.name} ist fehlgeschlagen`,
+      { error: message },
+      cancelled ? "warning" : "error",
+      id,
+    );
     throw error;
   }
+}
+
+async function runStructuredStage<T>(options: {
+  run: RunRow;
+  name: string;
+  role?: Role;
+  prompt: string;
+  progress: number;
+  kind: string;
+  systemPrompt: string;
+  submitName: string;
+  submitDescription: string;
+  parameters: TSchema;
+  schema: z.ZodType<T>;
+  semanticValidate?: (value: T) => string[];
+  contentValidate?: (content: string) => string[];
+  repairContext: string;
+  signal?: AbortSignal;
+}) {
+  let previousRaw = "";
+  let errors: string[] = [];
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const repairPrompt =
+      attempt === 0
+        ? options.prompt
+        : `Repariere ausschließlich die strukturierte Supervisor-Ausgabe. Starte keine Analyse neu.
+Rufe genau einmal ${options.submitName} mit einer vollständig gültigen Ausgabe auf.
+
+VALIDIERUNGSFEHLER:
+${errors.map((error) => `- ${error}`).join("\n")}
+
+VORHERIGE ROHAUSGABE:
+${previousRaw}
+
+ERLAUBTER KONTEXT:
+${options.repairContext}`;
+    const result = await runStage({
+      run: options.run,
+      name: attempt === 0 ? options.name : `${options.name} · Reparatur ${attempt}/2`,
+      role: options.role,
+      prompt: repairPrompt,
+      progress: options.progress,
+      kind: attempt === 0 ? options.kind : `${options.kind}-repair`,
+      systemPrompt: options.systemPrompt,
+      toolMode: "output-tools",
+      outputTools: [
+        {
+          name: options.submitName,
+          description: options.submitDescription,
+          parameters: options.parameters,
+        },
+      ],
+      signal: options.signal,
+    });
+    const validation = validateSingleSubmission({
+      calls: result.toolCalls,
+      submitName: options.submitName,
+      schema: options.schema,
+      semanticValidate: options.semanticValidate,
+      content: result.content,
+      contentValidate: options.contentValidate,
+    });
+    errors = validation.errors;
+    if (validation.success) return { stage: result, value: validation.value };
+    previousRaw = JSON.stringify({ text: result.content, toolCalls: result.toolCalls });
+  }
+  throw new SupervisorSubmissionError(
+    `${options.submitName} blieb nach zwei Reparaturversuchen ungültig: ${errors.join(" ")}`,
+  );
 }
 
 function waitForExtraction(
@@ -341,10 +791,10 @@ async function ensureDocumentExtraction(run: RunRow, signal: AbortSignal) {
   const stageName = "Dokumentextraktion";
   sqlite
     .prepare(
-      `INSERT INTO run_stages(id, run_id, name, status, started_at)
-       VALUES (?, ?, ?, 'running', ?)`,
+      `INSERT INTO run_stages(id, run_id, attempt_no, name, status, started_at)
+       VALUES (?, ?, ?, ?, 'running', ?)`,
     )
-    .run(stageId, run.id, stageName, now());
+    .run(stageId, run.id, run.current_attempt, stageName, now());
   sqlite
     .prepare("UPDATE runs SET current_stage = ?, progress = MAX(progress, 5) WHERE id = ?")
     .run(stageName, run.id);
@@ -679,32 +1129,99 @@ function documentContext(run: RunRow) {
   };
 }
 
-function parseTriage(content: string) {
-  const fenced =
-    content.match(/```json\s*([\s\S]*?)```/i)?.[1] ?? content.match(/\{[\s\S]*\}/)?.[0];
-  if (!fenced) return null;
-  try {
-    return JSON.parse(fenced) as {
-      mode?: "quick" | "standard" | "deep";
-      roles?: Role[];
-      activities?: ProposedActivityRoute[];
-      question?: string;
-      rationale?: string;
-    };
-  } catch {
-    return null;
-  }
-}
+const councilPlanSchema = z
+  .object({
+    mode: z.enum(["quick", "standard", "deep"]),
+    activities: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            evidence: z.array(z.string().min(1)).min(1),
+            triggerStatus: z.enum(["satisfied", "missing", "unclear"]),
+            missingInputs: z.array(z.string().min(1)).optional(),
+            consultants: z.array(z.string().min(1)).optional(),
+            rationale: z.string().min(1),
+          })
+          .strict(),
+      )
+      .min(1),
+    question: z.string().nullable(),
+    rationale: z.string().min(1),
+  })
+  .strict();
+type CouncilPlan = z.infer<typeof councilPlanSchema>;
 
-function consensusScore(content: string) {
-  const match = content.match(
-    /(?:KONSENS-STAERKE|Konsens(?:-Score)?|Consensus(?:-Score)?)\s*[:=]\s*([1-5](?:[.,]\d)?)/i,
+const councilPlanToolParameters = Type.Object(
+  {
+    mode: Type.Union([Type.Literal("quick"), Type.Literal("standard"), Type.Literal("deep")]),
+    activities: Type.Array(
+      Type.Object(
+        {
+          id: Type.String({ minLength: 1 }),
+          evidence: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+          triggerStatus: Type.Union([
+            Type.Literal("satisfied"),
+            Type.Literal("missing"),
+            Type.Literal("unclear"),
+          ]),
+          missingInputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+          consultants: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+          rationale: Type.String({ minLength: 1 }),
+        },
+        { additionalProperties: false },
+      ),
+      { minItems: 1 },
+    ),
+    question: Type.Union([Type.String(), Type.Null()]),
+    rationale: Type.String({ minLength: 1 }),
+  },
+  { additionalProperties: false },
+);
+
+const peerReviewSchema = z
+  .object({
+    ranking: z.array(z.string().min(1)),
+    consensus: z.number().int().min(1).max(5),
+  })
+  .strict();
+type PeerReviewSubmission = z.infer<typeof peerReviewSchema>;
+
+const peerReviewToolParameters = Type.Object(
+  {
+    ranking: Type.Array(Type.String({ minLength: 1 })),
+    consensus: Type.Integer({ minimum: 1, maximum: 5 }),
+  },
+  { additionalProperties: false },
+);
+
+export async function settleParallel<T>(
+  tasks: Array<Promise<T> | ((signal: AbortSignal) => Promise<T>)>,
+  parentSignal?: AbortSignal,
+) {
+  const controller = new AbortController();
+  const signal = parentSignal
+    ? AbortSignal.any([parentSignal, controller.signal])
+    : controller.signal;
+  let firstFailure: unknown;
+  const settled = await Promise.allSettled(
+    tasks.map(async (task) => {
+      try {
+        return await (typeof task === "function" ? task(signal) : task);
+      } catch (error) {
+        if (firstFailure === undefined) {
+          firstFailure = error;
+          controller.abort(
+            error instanceof Error
+              ? error
+              : new Error("Ein paralleler Aufruf ist endgültig fehlgeschlagen."),
+          );
+        }
+        throw error;
+      }
+    }),
   );
-  return match ? Number(match[1].replace(",", ".")) : 3;
-}
-
-async function settleParallel<T>(tasks: Array<Promise<T>>) {
-  const settled = await Promise.allSettled(tasks);
+  if (firstFailure !== undefined) throw firstFailure;
   const failure = settled.find(
     (result): result is PromiseRejectedResult => result.status === "rejected",
   );
@@ -784,14 +1301,14 @@ async function buildEvidence(run: RunRow, context: ReturnType<typeof documentCon
   return evidence.join("\n\n");
 }
 
-async function executeRun(runId: string) {
+export async function executeRun(runId: string) {
   if (activeRuns.has(runId)) return;
   activeRuns.add(runId);
   const run = sqlite
     .prepare(
       `SELECT r.*, d.name AS document_name, d.extracted_text,
               d.status AS document_status, d.mime_type AS document_mime_type,
-              d.original AS document_original
+              d.original AS document_original, d.sha256 AS document_sha256
        FROM runs r JOIN documents d ON d.id = r.document_id WHERE r.id = ?`,
     )
     .get(runId) as RunRow | undefined;
@@ -804,70 +1321,213 @@ async function executeRun(runId: string) {
 
   try {
     sqlite.prepare("UPDATE runs SET status = 'running', progress = 1 WHERE id = ?").run(runId);
+    sqlite
+      .prepare(
+        `UPDATE run_attempts SET status = 'running', error = NULL, completed_at = NULL
+         WHERE run_id = ? AND attempt_no = ?`,
+      )
+      .run(runId, run.current_attempt);
     event(runId, "run_started", "Council-Lauf gestartet", {
       provider: run.provider,
       model: run.model,
       requestedMode: run.mode,
     });
-    await ensureDocumentExtraction(run, controller.signal);
+    sqlite
+      .prepare(
+        `UPDATE runs SET current_stage = 'Tool-Capability-Prüfung', progress = 1 WHERE id = ?`,
+      )
+      .run(runId);
+    await runScheduler().withInferenceSlot(run.provider, controller.signal, () =>
+      probeCouncilToolCapability(run.provider, run.model, controller.signal),
+    );
+    event(runId, "tool_capability_verified", "Council-Tool-Unterstützung verifiziert", {
+      provider: run.provider,
+      model: run.model,
+    });
+    let reusableCheckpoints = validCheckpoints(run);
+    const completedReportsCheckpoint = reusableCheckpoints.get("reports");
+    if (completedReportsCheckpoint) {
+      announceCheckpointReuse(run, "reports", completedReportsCheckpoint);
+      const completedAt = now();
+      sqlite
+        .prepare(
+          `UPDATE runs SET status = 'completed', progress = 100, current_stage = 'Abgeschlossen',
+           completed_at = ? WHERE id = ? AND status = 'running'`,
+        )
+        .run(completedAt, runId);
+      sqlite
+        .prepare(
+          `UPDATE run_attempts SET status = 'completed', completed_at = ?, error = NULL
+           WHERE run_id = ? AND attempt_no = ?`,
+        )
+        .run(completedAt, runId, run.current_attempt);
+      event(runId, "run_completed", "Council-Lauf aus gültigen Checkpoints wiederhergestellt", {
+        presentations: checkpointOutputRefs(completedReportsCheckpoint),
+        originAttempt: checkpointOriginAttempt(run, completedReportsCheckpoint),
+      });
+      return;
+    }
+    const extractionCheckpoint = reusableCheckpoints.get("extraction");
+    if (extractionCheckpoint) {
+      const document = sqlite
+        .prepare("SELECT extracted_text, status FROM documents WHERE id = ?")
+        .get(run.document_id) as { extracted_text: string | null; status: string };
+      if (!document.extracted_text || document.status !== "ready") {
+        sqlite
+          .prepare(
+            `DELETE FROM run_checkpoints
+             WHERE run_id = ? AND attempt_no = ?`,
+          )
+          .run(run.id, run.current_attempt);
+        reusableCheckpoints = new Map();
+        await ensureDocumentExtraction(run, controller.signal);
+        completeCheckpoint(run, "extraction");
+      } else {
+        run.extracted_text = document.extracted_text;
+        run.document_status = document.status;
+        event(runId, "checkpoint_reused", "Checkpoint wiederverwendet: extraction", {
+          phase: "extraction",
+          originAttempt: extractionCheckpoint.inherited_from_attempt ?? run.current_attempt,
+        });
+      }
+    } else {
+      await ensureDocumentExtraction(run, controller.signal);
+      completeCheckpoint(run, "extraction");
+    }
     controller.signal.throwIfAborted();
     const context = documentContext(run);
-    artifact(runId, null, "coverage-manifest", "Dokument-Coverage-Manifest", context.manifest, {
-      chunks: context.chunks.length,
-      sourceSha256: sha256(Buffer.from(run.extracted_text)),
-    });
-    const evidence = await buildEvidence(run, context);
+    reusableCheckpoints = validCheckpoints(run);
+    const evidenceCheckpoint = reusableCheckpoints.get("evidence");
+    let evidence: string;
+    if (evidenceCheckpoint) {
+      const originAttempt = evidenceCheckpoint.inherited_from_attempt ?? run.current_attempt;
+      if (context.text.length <= 110_000) {
+        evidence = context.text;
+      } else {
+        const evidenceRows = sqlite
+          .prepare(
+            `SELECT content FROM artifacts
+             WHERE run_id = ? AND attempt_no = ? AND kind = 'evidence-map'
+             ORDER BY created_at, rowid`,
+          )
+          .all(runId, originAttempt) as Array<{ content: string }>;
+        if (!evidenceRows.length) {
+          throw new Error(
+            "Der Evidence-Checkpoint verweist auf keine wiederherstellbaren Belegkarten.",
+          );
+        }
+        evidence = evidenceRows.map((row) => row.content).join("\n\n");
+      }
+      event(runId, "checkpoint_reused", "Checkpoint wiederverwendet: evidence", {
+        phase: "evidence",
+        originAttempt,
+      });
+    } else {
+      const coverageArtifactId = artifact(
+        runId,
+        null,
+        "coverage-manifest",
+        "Dokument-Coverage-Manifest",
+        context.manifest,
+        {
+          chunks: context.chunks.length,
+          sourceSha256: sha256(Buffer.from(run.extracted_text)),
+        },
+      );
+      evidence = await buildEvidence(run, context);
+      completeCheckpoint(run, "evidence", [coverageArtifactId]);
+    }
     const focus = run.focus ? `\nBesonderer Fokus des Nutzers: ${run.focus}` : "";
-    const triage = await runStage({
-      run,
-      name: "QA-Architekt · RACI-Routing",
-      prompt: `Lies den gesamten Prüfgegenstand und erstelle vor allen Fachreviews den RACI-Ausführungsplan. Antworte zuerst mit genau einem JSON-Block:
-{"mode":"quick|standard|deep","activities":[{"id":"3.1","evidence":["exakter Locator aus dem Coverage-Manifest"],"triggerStatus":"satisfied|missing|unclear","missingInputs":[],"consultants":["Test-Manager"],"rationale":"konkreter Dokumentbezug und Bewertung des RACI-Triggers"}],"question":null|"...","rationale":"Gesamtbegründung"}
+    const allowedLocators = new Set(context.chunks.map((chunk) => chunk.locator));
+    const routingCheckpoint = reusableCheckpoints.get("routing-raci");
+    let triage: StageResult;
+    let parsed: CouncilPlan;
+    if (routingCheckpoint) {
+      const [persistedTriage] = loadCheckpointStages(run, routingCheckpoint);
+      if (!persistedTriage) {
+        throw new Error("Der Routing-Checkpoint enthält keine wiederherstellbare Triage.");
+      }
+      const validation = validateSingleSubmission({
+        calls: persistedTriage.toolCalls,
+        submitName: "submit_council_plan",
+        schema: councilPlanSchema,
+        semanticValidate: (value) =>
+          compileRaciAssignments(value.activities, allowedLocators).errors,
+      });
+      if (!validation.success) {
+        throw new Error(
+          `Der Routing-Checkpoint ist semantisch nicht wiederherstellbar: ${validation.errors.join(" ")}`,
+        );
+      }
+      triage = persistedTriage;
+      parsed = validation.value;
+      announceCheckpointReuse(run, "routing-raci", routingCheckpoint);
+    } else {
+      const triageSubmission = await runStructuredStage({
+        run,
+        name: "QA-Architekt · RACI-Routing",
+        prompt: `Lies den gesamten Prüfgegenstand und erstelle vor allen Fachreviews den RACI-Ausführungsplan. Rufe am Ende genau einmal submit_council_plan auf. Schreibe die Steuerdaten nicht als JSON oder Text.
 
 Regeln:
 - "mode" ist bei Auto nur deine Empfehlung für die Tiefe der späteren Council-Runden und beeinflusst die Rollenauswahl nicht.
 - Nenne in "activities" nur tatsächlich betroffene IDs aus der RACI-Matrix; der Server leitet A und R deterministisch ab.
-- "evidence" enthält mindestens einen exakten Locator aus dem Coverage-Manifest.
+- "evidence" enthält ausschließlich vollständige, exakt unveränderte Locator-Strings aus dem Coverage-Manifest. Hänge keine Erläuterung, kein Zitat und keinen Zeilenbereich an einen Locator; solche Details gehören in "rationale".
 - "triggerStatus" bewertet den Handoff-Trigger. Bei "missing" oder "unclear" enthält "missingInputs" mindestens einen konkreten fehlenden Input.
 - "consultants" darf nur konkret benötigte C-Rollen der jeweiligen Matrixzeile enthalten. Nenne niemals A, R oder I.
 - "question" ist nur bei einer zwingend fehlenden Information ein vollständiger Fragesatz mit Fragezeichen, sonst null.
 
 Danach folgt eine kurze, menschlich lesbare Scope- und Auswahlbegründung.${focus}\n\nDOKUMENT/BELEGKARTEN:\n${evidence}`,
-      progress: 18,
-      kind: "triage",
-      systemPrompt: raciRouterSystemPrompt(),
-    });
-    const parsed = parseTriage(triage.content);
-    const groundQuestion =
-      typeof parsed?.question === "string" && /[?？]\s*$/.test(parsed.question)
-        ? parsed.question.trim()
-        : null;
-    if (groundQuestion) {
-      const questionId = nanoid();
-      sqlite
-        .prepare(
-          "INSERT INTO run_questions(id, run_id, prompt, status, created_at) VALUES (?, ?, ?, 'open', ?)",
-        )
-        .run(questionId, runId, groundQuestion, now());
-      sqlite
-        .prepare(
-          "UPDATE runs SET status = 'waiting_for_input', current_stage = 'Rückfrage', progress = 20 WHERE id = ?",
-        )
-        .run(runId);
-      event(runId, "input_required", groundQuestion, { questionId }, "warning");
-      return;
+        progress: 18,
+        kind: "triage",
+        systemPrompt: raciRouterSystemPrompt(),
+        submitName: "submit_council_plan",
+        submitDescription:
+          "Reicht den vollständigen, matrixgebundenen RACI-Ausführungsplan beim QA Council ein.",
+        parameters: councilPlanToolParameters,
+        schema: councilPlanSchema,
+        semanticValidate: (value) =>
+          compileRaciAssignments(value.activities, allowedLocators).errors,
+        repairContext: `Erlaubte Rollen: ${QA_ROLES.join(", ")}
+Erlaubte Evidence-Locators: ${[...allowedLocators].join("; ")}
+Jeder Wert in "evidence" muss exakt einem dieser Locator-Strings entsprechen, ohne Präfix, Suffix, Zitat oder Kommentar.
+Erlaubte Aktivitäts-IDs: ${[...raciCatalog().keys()].join(", ")}`,
+      });
+      triage = triageSubmission.stage;
+      parsed = triageSubmission.value;
+      const groundQuestion =
+        typeof parsed.question === "string" && /[?？]\s*$/.test(parsed.question)
+          ? parsed.question.trim()
+          : null;
+      if (groundQuestion) {
+        const questionId = nanoid();
+        sqlite
+          .prepare(
+            `INSERT INTO run_questions(
+            id, run_id, attempt_no, prompt, status, created_at
+          ) VALUES (?, ?, ?, ?, 'open', ?)`,
+          )
+          .run(questionId, runId, run.current_attempt, groundQuestion, now());
+        sqlite
+          .prepare(
+            "UPDATE runs SET status = 'waiting_for_input', current_stage = 'Rückfrage', progress = 20 WHERE id = ?",
+          )
+          .run(runId);
+        sqlite
+          .prepare(
+            `UPDATE run_attempts SET status = 'waiting_for_input'
+           WHERE run_id = ? AND attempt_no = ?`,
+          )
+          .run(runId, run.current_attempt);
+        event(runId, "input_required", groundQuestion, { questionId }, "warning");
+        return;
+      }
+      completeCheckpoint(run, "routing-raci", [triage.id]);
     }
 
-    const recommendedMode = ["quick", "standard", "deep"].includes(parsed?.mode ?? "")
-      ? parsed?.mode
-      : "standard";
-    const mode = run.mode === "auto" ? (recommendedMode ?? "standard") : run.mode;
+    const mode = run.mode === "auto" ? parsed.mode : run.mode;
     sqlite.prepare("UPDATE runs SET resolved_mode = ? WHERE id = ?").run(mode, runId);
-    const proposal = Array.isArray(parsed?.activities) ? parsed.activities : [];
-    const compiled = compileRaciAssignments(
-      proposal,
-      new Set(context.chunks.map((chunk) => chunk.locator)),
-    );
+    const proposal = parsed.activities;
+    const compiled = compileRaciAssignments(proposal, allowedLocators);
     if (compiled.errors.length > 0 || compiled.assignments.length === 0) {
       throw new Error(
         `Der QA-Architekt lieferte keinen matrixkonformen RACI-Zuschnitt: ${compiled.errors.join(" ")}`,
@@ -884,19 +1544,39 @@ Danach folgt eine kurze, menschlich lesbare Scope- und Auswahlbegründung.${focu
         roles: selectedRoles,
         assignments,
         activities: proposal,
-        rationale: parsed?.rationale,
+        rationale: parsed.rationale,
       },
     );
 
-    event(
-      runId,
-      "parallel_stage_group_started",
-      `${selectedRoles.length} isolierte Einzelreviews starten parallel`,
-      { group: "role-reviews", count: selectedRoles.length },
-    );
-    const reviews = await settleParallel(
-      assignments.map(async (assignment, index) => {
-        const assignmentPrompt = `Arbeite in einer frischen, vollständig isolierten Sitzung als ${assignment.role}. Andere Reviewer und deren Antworten sind dir nicht bekannt. Erstelle dein Review exakt nach der kanonischen Council-Struktur.
+    const roleReviewsCheckpoint = reusableCheckpoints.get("role-reviews");
+    let reviews: Array<{ role: Role; result: StageResult }>;
+    if (roleReviewsCheckpoint) {
+      const persistedReviews = loadCheckpointStages(run, roleReviewsCheckpoint);
+      reviews = persistedReviews.map((stage) => {
+        if (!stage.role || !QA_ROLES.includes(stage.role)) {
+          throw new Error(`Ein Einzelreview-Checkpoint enthält keine gültige Rolle: ${stage.id}`);
+        }
+        return { role: stage.role, result: stage };
+      });
+      if (
+        reviews.length !== assignments.length ||
+        assignments.some((assignment) => !reviews.some((review) => review.role === assignment.role))
+      ) {
+        throw new Error(
+          "Der Einzelreview-Checkpoint deckt die aktuelle RACI-Rollenbesetzung nicht vollständig ab.",
+        );
+      }
+      announceCheckpointReuse(run, "role-reviews", roleReviewsCheckpoint);
+    } else {
+      event(
+        runId,
+        "parallel_stage_group_started",
+        `${selectedRoles.length} isolierte Einzelreviews starten parallel`,
+        { group: "role-reviews", count: selectedRoles.length },
+      );
+      reviews = await settleParallel(
+        assignments.map((assignment, index) => async (groupSignal) => {
+          const assignmentPrompt = `Arbeite in einer frischen, vollständig isolierten Sitzung als ${assignment.role}. Andere Reviewer und deren Antworten sind dir nicht bekannt. Erstelle dein Review exakt nach der kanonischen Council-Struktur.
 
 DEIN RACI-AUFTRAG:
 - Gesamtbeteiligung: ${assignment.participation === "full" ? "A/R-Fachreview" : "konsultatives C-Review"}
@@ -904,30 +1584,31 @@ DEIN RACI-AUFTRAG:
 ${formatRoleMandates(assignment)}
 
 Prüfe nur auf belegbarer Grundlage und nenne Locator zu jedem wesentlichen Befund. ${
-          assignment.participation === "full"
-            ? "Kernbefunde sind strikt auf die zugewiesenen A/R-Lanes beschränkt; andere Perspektiven bleiben kurze C-Kommentare."
-            : "Du gibst ausschließlich die benötigte konsultative Perspektive ab, übernimmst kein finales Verdict und eröffnest keine fremden Kernbefunde."
-        } Der KONFIDENZ-Block ist Pflicht.${focus}`;
-        if (context.text.length <= 110_000) {
-          return {
-            role: assignment.role,
-            result: await runStage({
-              run,
-              name: `Einzelreview · ${assignment.role}`,
+            assignment.participation === "full"
+              ? "Kernbefunde sind strikt auf die zugewiesenen A/R-Lanes beschränkt; andere Perspektiven bleiben kurze C-Kommentare."
+              : "Du gibst ausschließlich die benötigte konsultative Perspektive ab, übernimmst kein finales Verdict und eröffnest keine fremden Kernbefunde."
+          } Der KONFIDENZ-Block ist Pflicht.${focus}`;
+          if (context.text.length <= 110_000) {
+            return {
               role: assignment.role,
-              prompt: `${assignmentPrompt}\n\nVOLLSTÄNDIGES ORIGINALDOKUMENT:\n${context.text}`,
-              progress: 25 + Math.round((index / selectedRoles.length) * 35),
-              kind: "role-review",
-            }),
-          };
-        }
+              result: await runStage({
+                run,
+                name: `Einzelreview · ${assignment.role}`,
+                role: assignment.role,
+                prompt: `${assignmentPrompt}\n\nVOLLSTÄNDIGES ORIGINALDOKUMENT:\n${context.text}`,
+                progress: 25 + Math.round((index / selectedRoles.length) * 35),
+                kind: "role-review",
+                signal: groupSignal,
+              }),
+            };
+          }
 
-        const partials = await mapParallelBounded(context.chunks, 1, (chunk) =>
-          runStage({
-            run,
-            name: `Einzelreview · ${assignment.role} · Teil ${chunk.position + 1}/${context.chunks.length}`,
-            role: assignment.role,
-            prompt: `${assignmentPrompt}
+          const partials = await mapParallelBounded(context.chunks, 1, (chunk) =>
+            runStage({
+              run,
+              name: `Einzelreview · ${assignment.role} · Teil ${chunk.position + 1}/${context.chunks.length}`,
+              role: assignment.role,
+              prompt: `${assignmentPrompt}
 
 Dies ist exakt ein Teil des Originaldokuments. Erstelle ein vollständiges Teilreview nur für diesen Chunk; behalte alle Locator, Gap-IDs, Annahmen und Konfidenzsignale für die spätere rolleninterne Zusammenführung.
 
@@ -935,15 +1616,16 @@ ORIGINALCHUNK ${chunk.position + 1}/${context.chunks.length}
 LOCATOR: ${chunk.locator}
 SHA256: ${chunk.sha256}
 ${chunk.content}`,
-            progress: 25 + Math.round((index / selectedRoles.length) * 30),
-            kind: "role-review-chunk",
-          }),
-        );
-        const merged = await runStage({
-          run,
-          name: `Einzelreview · ${assignment.role}`,
-          role: assignment.role,
-          prompt: `${assignmentPrompt}
+              progress: 25 + Math.round((index / selectedRoles.length) * 30),
+              kind: "role-review-chunk",
+              signal: groupSignal,
+            }),
+          );
+          const merged = await runStage({
+            run,
+            name: `Einzelreview · ${assignment.role}`,
+            role: assignment.role,
+            prompt: `${assignmentPrompt}
 
 Führe ausschließlich deine eigenen Teilreviews zu genau einem kanonischen Einzelreview zusammen. Jeder Originalchunk muss im Coverage-Abschnitt mit Locator und Hash vorkommen. Entferne keine Minderheits-, Annahme- oder Konfidenzsignale und erfinde nichts.
 
@@ -952,64 +1634,202 @@ ${context.manifest}
 
 DEINE TEILREVIEWS:
 ${partials.map((partial, partialIndex) => `## Teil ${partialIndex + 1}\n${partial.content}`).join("\n\n")}`,
-          progress: 58,
-          kind: "role-review",
-        });
-        return { role: assignment.role, result: merged };
-      }),
-    );
+            progress: 58,
+            kind: "role-review",
+            signal: groupSignal,
+          });
+          return { role: assignment.role, result: merged };
+        }),
+      );
+      completeCheckpoint(
+        run,
+        "role-reviews",
+        reviews.map((review) => review.result.id),
+      );
+    }
 
-    const anonymizedReviews = reviews
-      .map((review, index) => `=== R${index + 1} ===\n${anonymizeReview(review.result.content)}`)
-      .join("\n\n");
+    const identifiedReviews = reviews.map((review) => ({
+      ...review,
+      reviewId: `R-${sha256(review.result.id).slice(0, 10)}`,
+    }));
     const passes = crossReviewPasses(mode, reviews.length);
-    event(
-      runId,
-      "parallel_stage_group_started",
-      `${passes} unabhängige Cross-Reviews starten parallel`,
-      { group: "cross-reviews", count: passes },
-    );
-    const crossReviews = await settleParallel(
-      Array.from({ length: passes }, async (_, index) => ({
-        pass: index + 1,
-        result: await runStage({
-          run,
-          name: `Cross-Review · Pass ${index + 1}/${passes}`,
-          prompt: `Du bist ein frischer, unabhängiger Cross-Reviewer im QA-Council. Bewerte ausschließlich den Befund, nicht die Rolle. Die expliziten Identitätslabels wurden zu R1…Rn anonymisiert.
+    const peerCheckpoint = reusableCheckpoints.get("peer-reviews-ranking");
+    let crossReviews: Array<{
+      reviewer: Role;
+      reviewerId: string;
+      result: StageResult;
+      submission: PeerReviewSubmission;
+    }>;
+    if (peerCheckpoint) {
+      const persistedCrossReviews = loadCheckpointStages(run, peerCheckpoint);
+      crossReviews = persistedCrossReviews.map((stage) => {
+        const reviewer =
+          stage.role ??
+          QA_ROLES.find((role) => stage.name.startsWith(`Cross-Review · ${role}`)) ??
+          null;
+        const identifiedReviewer = identifiedReviews.find((review) => review.role === reviewer);
+        if (!reviewer || !identifiedReviewer) {
+          throw new Error(
+            `Ein Cross-Review-Checkpoint hat keine bekannte Reviewer-Rolle: ${stage.id}`,
+          );
+        }
+        const allowedIds = identifiedReviews
+          .filter((candidate) => candidate.reviewId !== identifiedReviewer.reviewId)
+          .map((peer) => peer.reviewId);
+        const validation = validateSingleSubmission({
+          calls: stage.toolCalls,
+          submitName: "submit_peer_review",
+          schema: peerReviewSchema,
+          content: stage.content,
+          contentValidate: (content) =>
+            content.trim() ? [] : ["Die Markdown-Kritik des Cross-Reviews fehlt."],
+          semanticValidate: (value) => {
+            const unique = new Set(value.ranking);
+            return value.ranking.length === allowedIds.length &&
+              unique.size === allowedIds.length &&
+              allowedIds.every((id) => unique.has(id))
+              ? []
+              : [`ranking muss eine Permutation von ${allowedIds.join(", ")} sein.`];
+          },
+        });
+        if (!validation.success) {
+          throw new Error(
+            `Cross-Review ${stage.id} ist nicht wiederherstellbar: ${validation.errors.join(" ")}`,
+          );
+        }
+        return {
+          reviewer,
+          reviewerId: identifiedReviewer.reviewId,
+          result: stage,
+          submission: validation.value,
+        };
+      });
+      if (crossReviews.length !== passes) {
+        throw new Error(
+          `Der Cross-Review-Checkpoint enthält ${crossReviews.length} statt ${passes} Bewertungen.`,
+        );
+      }
+      announceCheckpointReuse(run, "peer-reviews-ranking", peerCheckpoint);
+    } else {
+      event(
+        runId,
+        "parallel_stage_group_started",
+        passes
+          ? `${passes} rollenbasierte Cross-Reviews starten parallel`
+          : "Peer-Ranking entfällt, weil nur eine Rolle eingeladen ist",
+        { group: "cross-reviews", count: passes },
+      );
+      crossReviews =
+        identifiedReviews.length < 2
+          ? []
+          : await settleParallel(
+              identifiedReviews.map((reviewer) => async (groupSignal) => {
+                const peers = identifiedReviews.filter(
+                  (candidate) => candidate.reviewId !== reviewer.reviewId,
+                );
+                const allowedIds = peers.map((peer) => peer.reviewId);
+                const submission = await runStructuredStage({
+                  run,
+                  name: `Cross-Review · ${reviewer.role}`,
+                  role: reviewer.role,
+                  prompt: `Du bewertest als ${reviewer.role} in einer frischen Sitzung ausschließlich die anonymisierten Reviews der anderen Rollen. Kritisiere die Inhalte in Markdown: stärkster Beitrag, angreifbarste Schwäche, kollektiver blinder Fleck sowie Lane-/Owner-Probleme. Bewahre Widersprüche und Minderheitsbefunde.
 
-Beantworte exakt:
-1. STÄRKSTES REVIEW: welches hilft einem Entscheider am meisten, und was genau deckte es auf?
-2. ANGREIFBARSTE SCHWÄCHE: welche eine Annahme oder Lücke im stärksten Review könnte ein Gegner ausnutzen?
-3. KOLLEKTIVER BLINDER FLECK: was haben alle übersehen? Falls nichts: explizit sagen.
-4. LANE-/OWNER-PRÜFUNG: Kernbefunde außerhalb der erkennbaren RACI-Lane oder falsche Owner benennen; sonst "keine Verstöße gefunden".
-5. KONSENS-STAERKE: <1-5>
+Rufe danach genau einmal submit_peer_review auf:
+- ranking ist eine vollständige Permutation aller erlaubten anonymen Review-IDs, bestes zuerst.
+- consensus ist eine ganze Zahl von 1 bis 5.
+- Schreibe weder Reviewer-Identität noch Kritik in den Tool-Aufruf.
 
-Bewahre Widersprüche und Minderheitsbefunde. Keine Rollenidentität erraten oder honorieren.
-
-PRÜFGEGENSTAND (Kurzfassung und Coverage):
+PRÜFGEGENSTAND:
 ${context.manifest}
 ${evidence.slice(0, 12_000)}
 
-ANONYMISIERTE EINZELREVIEWS:
-${anonymizedReviews}`,
-          progress: 60,
-          kind: "cross-review",
-        }),
+ANONYMISIERTE PEER-REVIEWS:
+${peers
+  .map((peer) => `=== ${peer.reviewId} ===\n${anonymizeReview(peer.result.content)}`)
+  .join("\n\n")}`,
+                  progress: 60,
+                  kind: "cross-review",
+                  systemPrompt: systemPromptFor(reviewer.role),
+                  submitName: "submit_peer_review",
+                  submitDescription:
+                    "Reicht ausschließlich die Rangfolge anonymer Peer-Reviews und den Consensus-Wert ein.",
+                  parameters: peerReviewToolParameters,
+                  schema: peerReviewSchema,
+                  contentValidate: (content) =>
+                    content.trim() ? [] : ["Die Markdown-Kritik des Cross-Reviews fehlt."],
+                  semanticValidate: (value) => {
+                    const unique = new Set(value.ranking);
+                    return value.ranking.length === allowedIds.length &&
+                      unique.size === allowedIds.length &&
+                      allowedIds.every((id) => unique.has(id))
+                      ? []
+                      : [`ranking muss eine Permutation von ${allowedIds.join(", ")} sein.`];
+                  },
+                  repairContext: `Serverseitige Reviewer-ID: ${reviewer.reviewId}
+Erlaubte Review-IDs: ${allowedIds.join(", ")}
+Erlaubte Rollenlabels: ${QA_ROLES.join(", ")}
+Erlaubte Evidence-Locators: ${[...allowedLocators].join("; ")}`,
+                  signal: groupSignal,
+                });
+                return {
+                  reviewer: reviewer.role,
+                  reviewerId: reviewer.reviewId,
+                  result: submission.stage,
+                  submission: submission.value,
+                };
+              }),
+            );
+      completeCheckpoint(
+        run,
+        "peer-reviews-ranking",
+        crossReviews.map((review) => review.result.id),
+      );
+    }
+    const ranking = aggregatePeerRankings(
+      identifiedReviews.map((review) => review.reviewId),
+      crossReviews.map((review) => ({
+        reviewerId: review.reviewerId,
+        ranking: review.submission.ranking,
+        consensus: review.submission.consensus,
       })),
     );
-    const averageConsensus =
-      crossReviews.reduce((sum, review) => sum + consensusScore(review.result.content), 0) /
-      crossReviews.length;
+    const averageConsensus = ranking.averageConsensus;
     const reviewsMaterial = reviews
       .map((item) => `## ${item.role}\n${item.result.content}`)
       .join("\n\n");
-    const crossReviewMaterial = crossReviews
-      .map((item) => `## Pass ${item.pass}\n${item.result.content}`)
-      .join("\n\n");
-    const jointReview = await runStage({
-      run,
-      name: "Council · gemeinsames Review",
-      prompt: `Erzeuge aus allen isolierten Einzelreviews und unabhängigen Cross-Reviews genau ein gemeinsames, noch nicht finales Council-Review. Der durchschnittliche Konsens-Score ist ${averageConsensus.toFixed(1)}/5.
+    const rankingMaterial = ranking.ranking
+      .map(
+        (reviewId, index) =>
+          `${index + 1}. ${reviewId} — Durchschnittsrang ${ranking.averageRanks[reviewId].toFixed(2)}`,
+      )
+      .join("\n");
+    const crossReviewMaterial = `${
+      crossReviews.length
+        ? crossReviews
+            .map((item) => `## Kritik von ${item.reviewer}\n${item.result.content}`)
+            .join("\n\n")
+        : "Zu wenige Peers für ein Cross-Review. Neutraler Consensus: 3,0/5."
+    }
+
+## Aggregierte Rangfolge
+
+${rankingMaterial}
+
+Consensus: ${averageConsensus.toFixed(1)}/5 · Confidence: ${ranking.confidence}`;
+    const jointCheckpoint = reusableCheckpoints.get("joint-review");
+    let jointReview: StageResult;
+    if (jointCheckpoint) {
+      const [persistedJointReview] = loadCheckpointStages(run, jointCheckpoint);
+      if (!persistedJointReview) {
+        throw new Error("Der Checkpoint des gemeinsamen Reviews ist nicht wiederherstellbar.");
+      }
+      jointReview = persistedJointReview;
+      announceCheckpointReuse(run, "joint-review", jointCheckpoint);
+    } else {
+      jointReview = await runStage({
+        run,
+        name: "Council · gemeinsames Review",
+        prompt: `Erzeuge aus allen isolierten Einzelreviews und unabhängigen Cross-Reviews genau ein gemeinsames, noch nicht finales Council-Review. Der durchschnittliche Konsens-Score ist ${averageConsensus.toFixed(1)}/5.
 
 Pflichtstruktur:
 1. VORLÄUFIGES GESAMTURTEIL
@@ -1029,14 +1849,30 @@ ${reviewsMaterial}
 
 CROSS-REVIEWS:
 ${crossReviewMaterial}`,
-      progress: 70,
-      kind: "joint-review",
-    });
+        progress: 70,
+        kind: "joint-review",
+      });
+      completeCheckpoint(run, "joint-review", [jointReview.id]);
+    }
 
-    const prosecutor = await runStage({
-      run,
-      name: "Council-Debatte · Ankläger",
-      prompt: `Du bist der ANKLÄGER der erzwungenen Council-Debatte. Greife das gemeinsame Review mit voller Kraft an – nicht um des Widerspruchs willen, sondern indem du die schwächste tragende Annahme findest.
+    const debateCheckpoint = reusableCheckpoints.get("pro-contra-debate");
+    let prosecutor: StageResult;
+    let defender: StageResult;
+    if (debateCheckpoint) {
+      const persistedDebate = loadCheckpointStages(run, debateCheckpoint);
+      const persistedProsecutor = persistedDebate.find((stage) => stage.name.includes("Ankläger"));
+      const persistedDefender = persistedDebate.find((stage) => stage.name.includes("Verteidiger"));
+      if (!persistedProsecutor || !persistedDefender) {
+        throw new Error("Der Debatten-Checkpoint ist nicht vollständig wiederherstellbar.");
+      }
+      prosecutor = persistedProsecutor;
+      defender = persistedDefender;
+      announceCheckpointReuse(run, "pro-contra-debate", debateCheckpoint);
+    } else {
+      prosecutor = await runStage({
+        run,
+        name: "Council-Debatte · Ankläger",
+        prompt: `Du bist der ANKLÄGER der erzwungenen Council-Debatte. Greife das gemeinsame Review mit voller Kraft an – nicht um des Widerspruchs willen, sondern indem du die schwächste tragende Annahme findest.
 
 Liefere unter 400 Wörtern:
 1. GETEILTE DOKTRIN: Was beruht auf gemeinsamer Normzitierung statt unabhängiger Beobachtung?
@@ -1049,13 +1885,13 @@ ${jointReview.content}
 ROHMATERIAL:
 ${reviewsMaterial}
 ${crossReviewMaterial}`,
-      progress: 73,
-      kind: "debate-prosecutor",
-    });
-    const defender = await runStage({
-      run,
-      name: "Council-Debatte · Verteidiger",
-      prompt: `Du bist der VERTEIDIGER der erzwungenen Council-Debatte. Antworte ehrlich auf den Ankläger. Trenne, was hält und was trifft. Glätte keinen berechtigten Angriff.
+        progress: 73,
+        kind: "debate-prosecutor",
+      });
+      defender = await runStage({
+        run,
+        name: "Council-Debatte · Verteidiger",
+        prompt: `Du bist der VERTEIDIGER der erzwungenen Council-Debatte. Antworte ehrlich auf den Ankläger. Trenne, was hält und was trifft. Glätte keinen berechtigten Angriff.
 
 Liefere unter 300 Wörtern:
 1. HÄLT STAND: welche Konsens-Befunde überleben, mit welchem konkreten Beleg statt Normzitat?
@@ -1073,9 +1909,11 @@ ${reviewsMaterial}
 
 CROSS-REVIEWS:
 ${crossReviewMaterial}`,
-      progress: 76,
-      kind: "debate-defender",
-    });
+        progress: 76,
+        kind: "debate-defender",
+      });
+      completeCheckpoint(run, "pro-contra-debate", [prosecutor.id, defender.id]);
+    }
     const debate = {
       id: defender.id,
       content: `## Ankläger\n\n${prosecutor.content}\n\n## Verteidiger\n\n${defender.content}`,
@@ -1085,32 +1923,60 @@ ${crossReviewMaterial}`,
     const councilRounds: Array<{
       round: number;
       content: string;
+      mergeId: string;
       deltas: Array<{ role: Role; result: StageResult }>;
     }> = [];
     const roundCount = councilRoundCount(mode);
-    for (let round = 1; round <= roundCount; round += 1) {
-      const roundMission =
-        round === 1
-          ? "Integration: Gegenpositionen einarbeiten, akzeptierte Claims stabilisieren und offenen Dissens registrieren."
-          : round === 2
-            ? "Reconciliation: offene Widersprüche, falsche Owner und Lane-Verstöße auflösen; abgeschwächte Befunde wiederherstellen."
-            : "Falsification & Closure: stärkste verbleibende Falsifikation und Kipp-Signale prüfen; nur belegbar schließen.";
-      event(
-        runId,
-        "parallel_stage_group_started",
-        `Council-Runde ${round}/${roundCount}: ${assignments.length} Rollen reagieren parallel`,
-        { group: "council-round", round, count: assignments.length },
-      );
-      const deltas = await settleParallel(
-        assignments.map(async (assignment) => {
-          const ownReview = reviews.find((review) => review.role === assignment.role);
-          return {
-            role: assignment.role,
-            result: await runStage({
-              run,
-              name: `Council-Runde ${round} · ${assignment.role}`,
+    const councilRoundsCheckpoint = reusableCheckpoints.get("council-rounds");
+    if (councilRoundsCheckpoint) {
+      const persistedRounds = loadCheckpointStages(run, councilRoundsCheckpoint);
+      const expectedStages = roundCount * (assignments.length + 1);
+      if (persistedRounds.length !== expectedStages) {
+        throw new Error(
+          `Der Council-Runden-Checkpoint enthält ${persistedRounds.length} statt ${expectedStages} Stufen.`,
+        );
+      }
+      for (let round = 1; round <= roundCount; round += 1) {
+        const offset = (round - 1) * (assignments.length + 1);
+        const persistedDeltas = persistedRounds.slice(offset, offset + assignments.length);
+        const merge = persistedRounds[offset + assignments.length];
+        const deltas = persistedDeltas.map((stage) => {
+          if (!stage.role || !QA_ROLES.includes(stage.role)) {
+            throw new Error(`Council-Runde ${round} enthält eine Stufe ohne gültige Rolle.`);
+          }
+          return { role: stage.role, result: stage };
+        });
+        if (!merge) {
+          throw new Error(`Council-Runde ${round} enthält keine Zusammenführung.`);
+        }
+        councilState = merge.content;
+        councilRounds.push({ round, content: merge.content, mergeId: merge.id, deltas });
+      }
+      announceCheckpointReuse(run, "council-rounds", councilRoundsCheckpoint);
+    } else {
+      for (let round = 1; round <= roundCount; round += 1) {
+        const roundMission =
+          round === 1
+            ? "Integration: Gegenpositionen einarbeiten, akzeptierte Claims stabilisieren und offenen Dissens registrieren."
+            : round === 2
+              ? "Reconciliation: offene Widersprüche, falsche Owner und Lane-Verstöße auflösen; abgeschwächte Befunde wiederherstellen."
+              : "Falsification & Closure: stärkste verbleibende Falsifikation und Kipp-Signale prüfen; nur belegbar schließen.";
+        event(
+          runId,
+          "parallel_stage_group_started",
+          `Council-Runde ${round}/${roundCount}: ${assignments.length} Rollen reagieren parallel`,
+          { group: "council-round", round, count: assignments.length },
+        );
+        const deltas = await settleParallel(
+          assignments.map((assignment) => async (groupSignal) => {
+            const ownReview = reviews.find((review) => review.role === assignment.role);
+            return {
               role: assignment.role,
-              prompt: `Du nimmst als ${assignment.role} an Council-Runde ${round}/${roundCount} teil. Wiederhole dein Einzelreview nicht. Prüfe den aktuellen gemeinsamen Stand ausschließlich gegen dein ursprüngliches isoliertes Review und deine RACI-Mandate.
+              result: await runStage({
+                run,
+                name: `Council-Runde ${round} · ${assignment.role}`,
+                role: assignment.role,
+                prompt: `Du nimmst als ${assignment.role} an Council-Runde ${round}/${roundCount} teil. Wiederhole dein Einzelreview nicht. Prüfe den aktuellen gemeinsamen Stand ausschließlich gegen dein ursprüngliches isoliertes Review und deine RACI-Mandate.
 
 RUNDENMANDAT:
 ${roundMission}
@@ -1133,16 +1999,17 @@ ${councilState}
 
 GEGENPOSITIONEN:
 ${debate.content}`,
-              progress: 78 + round * 2,
-              kind: "council-round-role",
-            }),
-          };
-        }),
-      );
-      const merged = await runStage({
-        run,
-        name: `Council-Runde ${round} · Zusammenführung`,
-        prompt: `Führe Council-Runde ${round}/${roundCount} gemäß ihrem Mandat in den vorherigen Stand ein. Ändere nur Aussagen, für die eine Rollenreaktion einen Review-/Gap-/Locator-Beleg nennt. Bewahre ungelösten Dissens und jeden berechtigten TRIFFT-Punkt sichtbar. Korrigiere falsche RACI-Owner. Führe ein kurzes Änderungsprotokoll. Erfinde keine neuen Fakten.
+                progress: 78 + round * 2,
+                kind: "council-round-role",
+                signal: groupSignal,
+              }),
+            };
+          }),
+        );
+        const merged = await runStage({
+          run,
+          name: `Council-Runde ${round} · Zusammenführung`,
+          prompt: `Führe Council-Runde ${round}/${roundCount} gemäß ihrem Mandat in den vorherigen Stand ein. Ändere nur Aussagen, für die eine Rollenreaktion einen Review-/Gap-/Locator-Beleg nennt. Bewahre ungelösten Dissens und jeden berechtigten TRIFFT-Punkt sichtbar. Korrigiere falsche RACI-Owner. Führe ein kurzes Änderungsprotokoll. Erfinde keine neuen Fakten.
 
 RUNDENMANDAT:
 ${roundMission}
@@ -1155,11 +2022,20 @@ ${debate.content}
 
 ROLLENREAKTIONEN:
 ${deltas.map((delta) => `## ${delta.role}\n${delta.result.content}`).join("\n\n")}`,
-        progress: 79 + round * 2,
-        kind: "council-round-merge",
-      });
-      councilState = merged.content;
-      councilRounds.push({ round, content: merged.content, deltas });
+          progress: 79 + round * 2,
+          kind: "council-round-merge",
+        });
+        councilState = merged.content;
+        councilRounds.push({ round, content: merged.content, mergeId: merged.id, deltas });
+      }
+      completeCheckpoint(
+        run,
+        "council-rounds",
+        councilRounds.flatMap((round) => [
+          ...round.deltas.map((delta) => delta.result.id),
+          round.mergeId,
+        ]),
+      );
     }
 
     const synthesisMaterial = `Modus: ${mode} (${roundCount} Council-Runden). Durchschnittlicher Konsens-Score: ${averageConsensus.toFixed(1)}/5.${focus}
@@ -1175,17 +2051,49 @@ ${debate.content}
 
 LETZTER COUNCIL-STAND:
 ${councilState}`;
-    const chairman = await runStage({
-      run,
-      name: "Finale Council-Synthese",
-      prompt: `Materialisiere den letzten Council-Stand in die vollständige kanonische Synthesestruktur. Priorisiere, belege, benenne RACI-Owner und nächste Schritte. Jeder neue Satz muss auf vorhandene Review-/Gap-/Locator-Belege zurückgehen. Ungelösten Dissens und TRIFFT-Punkte nicht entfernen. Keine Information erfinden.\n\n${synthesisMaterial}`,
-      progress: 88,
-      kind: "synthesis",
-    });
-    const dissentPass = await runStage({
-      run,
-      name: "Dissens-Audit",
-      prompt: `Vergleiche die finale Synthese mit Einzelreviews, Cross-Reviews, gemeinsamem Review, Gegenpositionen und letztem Council-Stand. Suche geschärfte Formulierungen, die zu Hedges wurden, verschwundene Risiken, abweichende Gesamturteile, Einzelrollen-Befunde und fehlende TRIFFT-Punkte. Liefere 2–5 Punkte "DISSENS ERHALTEN: …". Wenn nichts verloren ging: "DISSENS-LEDGER: Sauber." Keine neue Fachbehauptung erfinden.
+    const synthesisCheckpoint = reusableCheckpoints.get("synthesis-dissent");
+    let chairman: StageResult;
+    let dissentPass: StageResult;
+    let finalMarkdown: string;
+    let finalArtifactId: string;
+    if (synthesisCheckpoint) {
+      const persistedSynthesisStages = loadCheckpointStages(run, synthesisCheckpoint);
+      const persistedChairman = persistedSynthesisStages.find((stage) =>
+        stage.name.includes("Finale Council-Synthese"),
+      );
+      const persistedDissent = persistedSynthesisStages.find((stage) =>
+        stage.name.includes("Dissens-Audit"),
+      );
+      const originAttempt = checkpointOriginAttempt(run, synthesisCheckpoint);
+      const finalRef = checkpointOutputRefs(synthesisCheckpoint)[0];
+      const finalArtifact = finalRef
+        ? (sqlite
+            .prepare(
+              `SELECT id, content FROM artifacts
+               WHERE id = ? AND run_id = ? AND attempt_no = ? AND kind = 'final'`,
+            )
+            .get(finalRef, run.id, originAttempt) as { id: string; content: string } | undefined)
+        : undefined;
+      if (!persistedChairman || !persistedDissent || !finalArtifact) {
+        throw new Error("Der Synthese-Checkpoint ist nicht vollständig wiederherstellbar.");
+      }
+      chairman = persistedChairman;
+      dissentPass = persistedDissent;
+      finalArtifactId = finalArtifact.id;
+      finalMarkdown = finalArtifact.content;
+      announceCheckpointReuse(run, "synthesis-dissent", synthesisCheckpoint);
+    } else {
+      chairman = await runStage({
+        run,
+        name: "Finale Council-Synthese",
+        prompt: `Materialisiere den letzten Council-Stand in die vollständige kanonische Synthesestruktur. Priorisiere, belege, benenne RACI-Owner und nächste Schritte. Jeder neue Satz muss auf vorhandene Review-/Gap-/Locator-Belege zurückgehen. Ungelösten Dissens und TRIFFT-Punkte nicht entfernen. Keine Information erfinden.\n\n${synthesisMaterial}`,
+        progress: 88,
+        kind: "synthesis",
+      });
+      dissentPass = await runStage({
+        run,
+        name: "Dissens-Audit",
+        prompt: `Vergleiche die finale Synthese mit Einzelreviews, Cross-Reviews, gemeinsamem Review, Gegenpositionen und letztem Council-Stand. Suche geschärfte Formulierungen, die zu Hedges wurden, verschwundene Risiken, abweichende Gesamturteile, Einzelrollen-Befunde und fehlende TRIFFT-Punkte. Liefere 2–5 Punkte "DISSENS ERHALTEN: …". Wenn nichts verloren ging: "DISSENS-LEDGER: Sauber." Keine neue Fachbehauptung erfinden.
 
 FINALE SYNTHESE:
 ${chairman.content}
@@ -1207,69 +2115,85 @@ ${councilRounds
   .join("\n\n")}
 
 ${synthesisMaterial}`,
-      progress: 90,
-      kind: "dissent-pass",
-    });
-    const synthesis = {
-      id: dissentPass.id,
-      content: `${chairman.content}\n\n## Dissens-Ledger\n\n${dissentPass.content}`,
-    };
-
-    const finalMarkdown = `# QA-Council-Ergebnis: ${run.document_name}
+        progress: 90,
+        kind: "dissent-pass",
+      });
+      const councilRoundMaterial = councilRounds
+        .map(
+          (item) =>
+            `### Runde ${item.round} · Rollenreaktionen\n\n${item.deltas
+              .map((delta) => `#### ${delta.role}\n\n${delta.result.content}`)
+              .join("\n\n")}\n\n### Runde ${item.round} · Zusammenführung\n\n${item.content}`,
+        )
+        .join("\n\n");
+      finalMarkdown = `# QA-Council-Ergebnis: ${run.document_name}
 
 ## Finale Synthese
 
-${synthesis.content}
+${chairman.content}
 
-## Triage, Scope und RACI
+## Triage und RACI
 
 ${triage.content}
+
+## Isolierte Einzelreviews
+
+${reviewsMaterial}
+
+## Cross-Reviews
+
+${crossReviewMaterial}
 
 ## Gemeinsames Review
 
 ${jointReview.content}
 
-## Nachweis der vollständigen Dokumentverarbeitung
+## Debattenprotokoll
+
+${debate.content}
+
+## Council-Runden
+
+${councilRoundMaterial}
+
+## Dissent-Audit
+
+${dissentPass.content}
+
+## Abdeckungsmanifest
 
 ${context.manifest}
 `;
-    const finalArtifactId = artifact(
-      runId,
-      null,
-      "final",
-      "Finales Council-Ergebnis",
-      finalMarkdown,
-      {
+      finalArtifactId = artifact(runId, null, "final", "Finales Council-Ergebnis", finalMarkdown, {
         mode,
         roles: selectedRoles,
         consensus: averageConsensus,
         chunksProcessed: context.chunks.length,
         chunksTotal: context.chunks.length,
-      },
-    );
-    event(runId, "final_created", "Kanonisches finales Ergebnis erzeugt", { finalArtifactId });
+      });
+      event(runId, "final_created", "Kanonisches finales Ergebnis erzeugt", {
+        finalArtifactId,
+      });
+      completeCheckpoint(run, "synthesis-dissent", [finalArtifactId, chairman.id, dissentPass.id]);
+    }
     controller.signal.throwIfAborted();
 
     const textResult = await createPresentation({
       kind: "text",
-      finalMarkdown,
+      finalMarkdown: finalSynthesisMarkdown(finalMarkdown),
       documentName: run.document_name,
     });
-    const textPresentationId = nanoid();
-    sqlite
-      .prepare(
-        `INSERT INTO presentations(
-          id, run_id, kind, title, html, source_artifact_id, pages_json, created_at
-        ) VALUES (?, ?, 'text', ?, ?, ?, '[]', ?)`,
-      )
-      .run(
-        textPresentationId,
-        runId,
-        textResult.title,
-        bindPresentationRoute(textResult.html, textPresentationId),
-        finalArtifactId,
-        now(),
-      );
+    const textPresentationId = persistPresentation({
+      runId,
+      attemptNo: run.current_attempt,
+      kind: "text",
+      title: textResult.title,
+      sourceArtifactId: finalArtifactId,
+      render: (presentationId) => ({
+        html: bindPresentationRoute(textResult.html, presentationId),
+        pagesJson: "[]",
+      }),
+    });
     event(runId, "result_published", "Fachliches Text-Ergebnis ist bereits verfügbar", {
       presentationId: textPresentationId,
       pending: ["newspaper", "onepaper"],
@@ -1312,40 +2236,51 @@ Zahlen, Zitate, Owner oder Entscheidungen. report.ts bleibt ein reines Literalma
 ausführbaren Code. Gib am Ende nur eine kurze Zusammenfassung deiner tatsächlich vorgenommenen
 Dateiänderungen aus.
 
-FINALES COUNCIL-ERGEBNIS:
+    FINALES COUNCIL-ERGEBNIS:
 ${finalMarkdown}`;
-    await settleParallel([
-      runStage({
-        run,
-        name: "Report-Build · Tageszeitung",
-        prompt: `Gestalte eine echte, laute digitale Tageszeitung mit eigenständigen Ressortseiten.
-Die Titelseite priorisiert; Unterseiten vertiefen und wiederholen nicht bloß.
+    await settleParallel(
+      [
+        (groupSignal) =>
+          runStage({
+            run,
+            name: "Report-Build · Tageszeitung",
+            prompt: `Gestalte eine ruhige, warme digitale QA-Publikation im verbindlichen
+„Velvet Green Room“-Stil des Skills mit eigenständigen Ressortseiten. Die Titelseite priorisiert;
+Unterseiten vertiefen und wiederholen nicht bloß. Bewahre die exakten Farbrollen, großzügigen
+Leerraum und den Prüfzugang als sachliche Navigation zur finalen Entscheidung.
 
 ${commonBuilderPrompt}`,
-        progress: 92,
-        kind: "report-build-newspaper",
-        systemPrompt: reportDesignerSystemPrompt(true),
-        skillHashes: { [REPORT_DESIGN_SKILL_FILE]: sha256(designSkill) },
-        workspaceDir: workspace.newspaper.root,
-        toolMode: "read-edit",
-      }),
-      runStage({
-        run,
-        name: "Report-Build · Visual Report",
-        prompt: `Gestalte einen langen, hochwertigen Visual Report mit mindestens drei
-unterschiedlichen, belegten HTML/CSS-Informationsformen und drei inhaltlich spezifischen
+            progress: 92,
+            kind: "report-build-newspaper",
+            systemPrompt: reportDesignerSystemPrompt(true),
+            skillHashes: { [REPORT_DESIGN_SKILL_FILE]: sha256(designSkill) },
+            workspaceDir: workspace.newspaper.root,
+            toolMode: "read-edit",
+            signal: groupSignal,
+          }),
+        (groupSignal) =>
+          runStage({
+            run,
+            name: "Report-Build · Visual Report",
+            prompt: `Gestalte einen langen, hochwertigen Visual Report im verbindlichen
+„Group Chat“-Stil des Skills. Nutze einen disziplinierten Gesprächsfaden mit großzügigen Bubbles,
+exakten Farbrollen und einem echten Composer-Link zu den nächsten Schritten. Verwende mindestens
+drei unterschiedliche, belegte HTML/CSS-Informationsformen und drei inhaltlich spezifische
 Bildbriefings im Manifest. Nutze Ablauf, Matrix, Timeline, Beziehungen oder Evidenzkarten;
-erfinde keine Fake-Metriken.
+erfinde keine Fake-Metriken oder Absenderzitate.
 
 ${commonBuilderPrompt}`,
-        progress: 92,
-        kind: "report-build-visual",
-        systemPrompt: reportDesignerSystemPrompt(true),
-        skillHashes: { [REPORT_DESIGN_SKILL_FILE]: sha256(designSkill) },
-        workspaceDir: workspace.visualReport.root,
-        toolMode: "read-edit",
-      }),
-    ]);
+            progress: 92,
+            kind: "report-build-visual",
+            systemPrompt: reportDesignerSystemPrompt(true),
+            skillHashes: { [REPORT_DESIGN_SKILL_FILE]: sha256(designSkill) },
+            workspaceDir: workspace.visualReport.root,
+            toolMode: "read-edit",
+            signal: groupSignal,
+          }),
+      ],
+      controller.signal,
+    );
     controller.signal.throwIfAborted();
 
     let reportValidation = await validateReportWorkspace(runId, expectedPageSlugs);
@@ -1380,32 +2315,39 @@ ${commonBuilderPrompt}`,
       const staticFeedback = reportValidation.findings
         .map((finding, index) => `${index + 1}. ${finding}`)
         .join("\n");
-      await settleParallel([
-        runStage({
-          run,
-          name: "Report-Fix · Tageszeitung",
-          prompt: `Die statische Schlussprüfung meldet folgende Befunde:\n${staticFeedback}\n
+      await settleParallel(
+        [
+          (groupSignal) =>
+            runStage({
+              run,
+              name: "Report-Fix · Tageszeitung",
+              prompt: `Die statische Schlussprüfung meldet folgende Befunde:\n${staticFeedback}\n
 Lies die drei vorhandenen Dateien und korrigiere mit edit nur Befunde, die die Zeitung betreffen.
 Bewahre belegte Inhalte und alle Ressortseiten. Antworte nur mit einer kurzen Änderungsübersicht.`,
-          progress: 93,
-          kind: "report-static-fix-newspaper",
-          systemPrompt: reportDesignerSystemPrompt(true),
-          workspaceDir: workspace.newspaper.root,
-          toolMode: "read-edit",
-        }),
-        runStage({
-          run,
-          name: "Report-Fix · Visual Report",
-          prompt: `Die statische Schlussprüfung meldet folgende Befunde:\n${staticFeedback}\n
+              progress: 93,
+              kind: "report-static-fix-newspaper",
+              systemPrompt: reportDesignerSystemPrompt(true),
+              workspaceDir: workspace.newspaper.root,
+              toolMode: "read-edit",
+              signal: groupSignal,
+            }),
+          (groupSignal) =>
+            runStage({
+              run,
+              name: "Report-Fix · Visual Report",
+              prompt: `Die statische Schlussprüfung meldet folgende Befunde:\n${staticFeedback}\n
 Lies die drei vorhandenen Dateien und korrigiere mit edit nur Befunde, die den Visual Report
 betreffen. Bewahre belegte Inhalte und Bild-Slots. Antworte nur mit einer Änderungsübersicht.`,
-          progress: 93,
-          kind: "report-static-fix-visual",
-          systemPrompt: reportDesignerSystemPrompt(true),
-          workspaceDir: workspace.visualReport.root,
-          toolMode: "read-edit",
-        }),
-      ]);
+              progress: 93,
+              kind: "report-static-fix-visual",
+              systemPrompt: reportDesignerSystemPrompt(true),
+              workspaceDir: workspace.visualReport.root,
+              toolMode: "read-edit",
+              signal: groupSignal,
+            }),
+        ],
+        controller.signal,
+      );
       reportValidation = await validateReportWorkspace(runId, expectedPageSlugs);
       artifact(
         runId,
@@ -1463,20 +2405,25 @@ betreffen. Bewahre belegte Inhalte und Bild-Slots. Antworte nur mit einer Änder
     const vision = await modelSupportsVision(run.provider, run.model);
     const reviewImages: ImageContent[] = [];
     if (vision && run.provider !== "aibox") {
-      const [newspaperShot, visualShot] = await settleParallel([
-        createPresentationScreenshot(
-          candidateNewspaper.html,
-          "Zeitungs-Titelseite",
-          { width: 1440, height: 1600 },
-          controller.signal,
-        ),
-        createPresentationScreenshot(
-          candidateVisual.html,
-          "Visual Report",
-          { width: 1280, height: 2000 },
-          controller.signal,
-        ),
-      ]);
+      const [newspaperShot, visualShot] = await settleParallel(
+        [
+          (groupSignal) =>
+            createPresentationScreenshot(
+              candidateNewspaper.html,
+              "Zeitungs-Titelseite",
+              { width: 1440, height: 1600 },
+              groupSignal,
+            ),
+          (groupSignal) =>
+            createPresentationScreenshot(
+              candidateVisual.html,
+              "Visual Report",
+              { width: 1280, height: 2000 },
+              groupSignal,
+            ),
+        ],
+        controller.signal,
+      );
       reviewImages.push(
         { type: "image", data: newspaperShot.toString("base64"), mimeType: "image/png" },
         { type: "image", data: visualShot.toString("base64"), mimeType: "image/png" },
@@ -1486,38 +2433,44 @@ betreffen. Bewahre belegte Inhalte und Bild-Slots. Antworte nur mit einer Änder
       reviewers: ["code-quality", "visual-design", "content-traceability"],
       screenshots: reviewImages.length,
     });
-    const [codeReview, designReview, contentReview] = await settleParallel([
-      runStage({
-        run,
-        name: "Report-Review · Code-Qualität",
-        prompt: `Prüfe den eingefrorenen Workspace-Snapshot auf HTML-Semantik, Accessibility,
+    const [codeReview, designReview, contentReview] = await settleParallel(
+      [
+        (groupSignal) =>
+          runStage({
+            run,
+            name: "Report-Review · Code-Qualität",
+            prompt: `Prüfe den eingefrorenen Workspace-Snapshot auf HTML-Semantik, Accessibility,
 interne Links, CSS-Robustheit, responsive Layouts und das statische TS-Manifest. Nenne nur konkrete
 Findings mit Ziel-Datei, Evidenz, Schwere und präziser Änderung. Du hast keine Werkzeuge.
 
 ${reportAssembly.snapshot}`,
-        progress: 94,
-        kind: "report-review-code",
-        systemPrompt: reportDesignerSystemPrompt(),
-      }),
-      runStage({
-        run,
-        name: "Report-Review · visuelles Design",
-        prompt: `Prüfe Zeitung und Visual Report auf Hierarchie, Dichte, Rhythmus, Kontrast,
+            progress: 94,
+            kind: "report-review-code",
+            systemPrompt: reportDesignerSystemPrompt(),
+            signal: groupSignal,
+          }),
+        (groupSignal) =>
+          runStage({
+            run,
+            name: "Report-Review · visuelles Design",
+            prompt: `Prüfe Zeitung und Visual Report auf Hierarchie, Dichte, Rhythmus, Kontrast,
 Overflow, Bildräume, mobile Priorisierung und Printwirkung. Die Zeitung soll laut und
 redaktionell sein; der Visual Report informationsgrafisch und abwechslungsreich. Nenne konkrete
 Dateiänderungen, keine vollständige Neufassung.
 
 WORKSPACE:
 ${reportAssembly.snapshot}`,
-        progress: 94,
-        kind: "report-review-design",
-        systemPrompt: reportDesignerSystemPrompt(),
-        images: reviewImages.length ? reviewImages : undefined,
-      }),
-      runStage({
-        run,
-        name: "Report-Review · Inhalt und Nachweis",
-        prompt: `Vergleiche sichtbare Aussagen beider Reports gegen das finale Council-Ergebnis.
+            progress: 94,
+            kind: "report-review-design",
+            systemPrompt: reportDesignerSystemPrompt(),
+            images: reviewImages.length ? reviewImages : undefined,
+            signal: groupSignal,
+          }),
+        (groupSignal) =>
+          runStage({
+            run,
+            name: "Report-Review · Inhalt und Nachweis",
+            prompt: `Vergleiche sichtbare Aussagen beider Reports gegen das finale Council-Ergebnis.
 Suche erfundene Fakten, fehlende kritische Befunde, verschluckten Dissens, falsche Priorität und
 unklare Belege. Nenne pro Finding Ziel-Datei, Evidenz und präzise Änderung; schreibe nichts neu.
 
@@ -1526,11 +2479,14 @@ ${finalMarkdown}
 
 WORKSPACE:
 ${reportAssembly.snapshot}`,
-        progress: 94,
-        kind: "report-review-content",
-        systemPrompt: reportDesignerSystemPrompt(),
-      }),
-    ]);
+            progress: 94,
+            kind: "report-review-content",
+            systemPrompt: reportDesignerSystemPrompt(),
+            signal: groupSignal,
+          }),
+      ],
+      controller.signal,
+    );
     controller.signal.throwIfAborted();
 
     const consolidatedFindings = `## Code-Qualität\n${codeReview.content}
@@ -1548,36 +2504,43 @@ ${reportAssembly.snapshot}`,
     event(runId, "parallel_stage_group_started", "Finale Report-Anpassungen laufen parallel", {
       branches: ["newspaper", "visual-report"],
     });
-    await settleParallel([
-      runStage({
-        run,
-        name: "Report-Final-Patch · Tageszeitung",
-        prompt: `Lies die drei bestehenden Dateien. Setze mit edit ausschließlich relevante
+    await settleParallel(
+      [
+        (groupSignal) =>
+          runStage({
+            run,
+            name: "Report-Final-Patch · Tageszeitung",
+            prompt: `Lies die drei bestehenden Dateien. Setze mit edit ausschließlich relevante
 Findings für die Tageszeitung um. Bewahre gute Gestaltung und belegte Aussagen; keine
 Komplett-Neuschreibung und keine neuen Dateien.
 
 ${consolidatedFindings}`,
-        progress: 96,
-        kind: "report-final-patch-newspaper",
-        systemPrompt: reportDesignerSystemPrompt(true),
-        workspaceDir: workspace.newspaper.root,
-        toolMode: "read-edit",
-      }),
-      runStage({
-        run,
-        name: "Report-Final-Patch · Visual Report",
-        prompt: `Lies die drei bestehenden Dateien. Setze mit edit ausschließlich relevante
+            progress: 96,
+            kind: "report-final-patch-newspaper",
+            systemPrompt: reportDesignerSystemPrompt(true),
+            workspaceDir: workspace.newspaper.root,
+            toolMode: "read-edit",
+            signal: groupSignal,
+          }),
+        (groupSignal) =>
+          runStage({
+            run,
+            name: "Report-Final-Patch · Visual Report",
+            prompt: `Lies die drei bestehenden Dateien. Setze mit edit ausschließlich relevante
 Findings für den Visual Report um. Bewahre gute Gestaltung, belegte Aussagen, Infografiken und
 alle Bild-Slots; keine Komplett-Neuschreibung und keine neuen Dateien.
 
 ${consolidatedFindings}`,
-        progress: 96,
-        kind: "report-final-patch-visual",
-        systemPrompt: reportDesignerSystemPrompt(true),
-        workspaceDir: workspace.visualReport.root,
-        toolMode: "read-edit",
-      }),
-    ]);
+            progress: 96,
+            kind: "report-final-patch-visual",
+            systemPrompt: reportDesignerSystemPrompt(true),
+            workspaceDir: workspace.visualReport.root,
+            toolMode: "read-edit",
+            signal: groupSignal,
+          }),
+      ],
+      controller.signal,
+    );
     reportValidation = await validateReportWorkspace(runId, expectedPageSlugs);
     if (!reportValidation.valid) {
       const finalStaticFeedback = reportValidation.findings
@@ -1590,32 +2553,39 @@ ${consolidatedFindings}`,
         { findings: reportValidation.findings, phase: "final" },
         "warning",
       );
-      await settleParallel([
-        runStage({
-          run,
-          name: "Report-Schlusskorrektur · Tageszeitung",
-          prompt: `Die finale statische Prüfung meldet folgende Befunde:\n${finalStaticFeedback}\n
+      await settleParallel(
+        [
+          (groupSignal) =>
+            runStage({
+              run,
+              name: "Report-Schlusskorrektur · Tageszeitung",
+              prompt: `Die finale statische Prüfung meldet folgende Befunde:\n${finalStaticFeedback}\n
 Lies die bestehenden Dateien und korrigiere mit edit ausschließlich die Befunde der
 Tageszeitung. Bewahre Inhalte, Seiten und Bild-Hooks. Keine neuen Dateien.`,
-          progress: 97,
-          kind: "report-final-static-fix-newspaper",
-          systemPrompt: reportDesignerSystemPrompt(true),
-          workspaceDir: workspace.newspaper.root,
-          toolMode: "read-edit",
-        }),
-        runStage({
-          run,
-          name: "Report-Schlusskorrektur · Visual Report",
-          prompt: `Die finale statische Prüfung meldet folgende Befunde:\n${finalStaticFeedback}\n
+              progress: 97,
+              kind: "report-final-static-fix-newspaper",
+              systemPrompt: reportDesignerSystemPrompt(true),
+              workspaceDir: workspace.newspaper.root,
+              toolMode: "read-edit",
+              signal: groupSignal,
+            }),
+          (groupSignal) =>
+            runStage({
+              run,
+              name: "Report-Schlusskorrektur · Visual Report",
+              prompt: `Die finale statische Prüfung meldet folgende Befunde:\n${finalStaticFeedback}\n
 Lies die bestehenden Dateien und korrigiere mit edit ausschließlich die Befunde des
 Visual Reports. Bewahre belegte Infografiken und alle drei Bild-Hooks. Keine neuen Dateien.`,
-          progress: 97,
-          kind: "report-final-static-fix-visual",
-          systemPrompt: reportDesignerSystemPrompt(true),
-          workspaceDir: workspace.visualReport.root,
-          toolMode: "read-edit",
-        }),
-      ]);
+              progress: 97,
+              kind: "report-final-static-fix-visual",
+              systemPrompt: reportDesignerSystemPrompt(true),
+              workspaceDir: workspace.visualReport.root,
+              toolMode: "read-edit",
+              signal: groupSignal,
+            }),
+        ],
+        controller.signal,
+      );
       reportValidation = await validateReportWorkspace(runId, expectedPageSlugs);
       if (!reportValidation.valid) {
         throw new Error(
@@ -1643,8 +2613,8 @@ Visual Reports. Bewahre belegte Infografiken und alle drei Bild-Hooks. Keine neu
       text: textPresentationId,
     };
     await settleParallel(
-      presentationOrder.map(async (kind) => {
-        controller.signal.throwIfAborted();
+      presentationOrder.map((kind) => async (groupSignal) => {
+        groupSignal.throwIfAborted();
         const workspaceKind = kind === "newspaper" ? "newspaper" : "visual-report";
         const presentation = await createPresentation({
           kind,
@@ -1664,7 +2634,7 @@ Visual Reports. Bewahre belegte Infografiken und alle drei Bild-Hooks. Keine neu
           model: run.model,
           runId,
           imageProvider: run.image_provider,
-          signal: controller.signal,
+          signal: groupSignal,
           onEvent: (piEvent) => {
             if (piEvent.type === "image_generation_started") {
               sqlite
@@ -1677,34 +2647,35 @@ Visual Reports. Bewahre belegte Infografiken und alle drei Bild-Hooks. Keine neu
             event(runId, piEvent.type, piEvent.message, piEvent.data, piEvent.level ?? "info");
           },
         });
-        controller.signal.throwIfAborted();
-        const presentationId = nanoid();
+        groupSignal.throwIfAborted();
+        const presentationId = persistPresentation({
+          runId,
+          attemptNo: run.current_attempt,
+          kind,
+          title: presentation.title,
+          sourceArtifactId: finalArtifactId,
+          render: (id) => ({
+            html: bindPresentationRoute(presentation.html, id),
+            pagesJson: JSON.stringify(
+              (presentation.pages ?? []).map((page) => ({
+                ...page,
+                html: bindPresentationRoute(page.html, id),
+              })),
+            ),
+          }),
+        });
         presentationIds[kind] = presentationId;
-        const presentationPages = (presentation.pages ?? []).map((page) => ({
-          ...page,
-          html: bindPresentationRoute(page.html, presentationId),
-        }));
-        sqlite
-          .prepare(
-            `INSERT INTO presentations(
-              id, run_id, kind, title, html, source_artifact_id, pages_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .run(
-            presentationId,
-            runId,
-            kind,
-            presentation.title,
-            bindPresentationRoute(presentation.html, presentationId),
-            finalArtifactId,
-            JSON.stringify(presentationPages),
-            now(),
-          );
         event(runId, "presentation_completed", `${presentation.title} veröffentlicht`, {
           presentationId,
           kind,
         });
       }),
+      controller.signal,
+    );
+    completeCheckpoint(
+      run,
+      "reports",
+      Object.values(presentationIds).filter((id): id is string => Boolean(id)),
     );
     controller.signal.throwIfAborted();
     const completed = sqlite
@@ -1714,6 +2685,12 @@ Visual Reports. Bewahre belegte Infografiken und alle drei Bild-Hooks. Keine neu
       )
       .run(now(), runId);
     if (completed.changes !== 1) throw new DOMException("Lauf wurde abgebrochen.", "AbortError");
+    sqlite
+      .prepare(
+        `UPDATE run_attempts SET status = 'completed', completed_at = ?, error = NULL
+         WHERE run_id = ? AND attempt_no = ?`,
+      )
+      .run(now(), runId, run.current_attempt);
     event(runId, "run_completed", "Council-Lauf und beide visuellen Designausgaben abgeschlossen", {
       presentationId: presentationIds[run.presentation],
       presentations: presentationIds,
@@ -1728,6 +2705,12 @@ Visual Reports. Bewahre belegte Infografiken und alle drei Bild-Hooks. Keine neu
         .run(cancelledAt, runId);
       sqlite
         .prepare(
+          `UPDATE run_attempts SET status = 'cancelled', completed_at = ?, error = NULL
+           WHERE run_id = ? AND attempt_no = ?`,
+        )
+        .run(cancelledAt, runId, run.current_attempt);
+      sqlite
+        .prepare(
           `UPDATE runs SET status = 'cancelled', error = NULL, current_stage = 'Abgebrochen',
            completed_at = ? WHERE id = ?
            AND status IN ('queued', 'running', 'cancelling', 'waiting_for_input')`,
@@ -1738,22 +2721,50 @@ Visual Reports. Bewahre belegte Infografiken und alle drei Bild-Hooks. Keine neu
       });
       return;
     }
-    const message = error instanceof Error ? error.message : String(error);
+    const message = publicErrorMessage(error);
     sqlite
       .prepare(
         `UPDATE runs SET status = 'failed', error = ?, current_stage = 'Fehler',
          completed_at = ? WHERE id = ?`,
       )
       .run(message, now(), runId);
+    sqlite
+      .prepare(
+        `UPDATE run_attempts SET status = 'failed', error = ?, completed_at = ?
+         WHERE run_id = ? AND attempt_no = ?`,
+      )
+      .run(message, now(), runId, run.current_attempt);
     event(runId, "run_failed", message, undefined, "error");
   } finally {
     activeRuns.delete(runId);
     activeRunControllers.delete(runId);
+    const terminal = sqlite.prepare("SELECT status FROM runs WHERE id = ?").get(runId) as
+      | { status: string }
+      | undefined;
+    if (terminal && ["completed", "failed", "cancelled"].includes(terminal.status)) {
+      await removeReportWorkspace(runId).catch(() => undefined);
+    }
   }
 }
 
+const schedulers = new WeakMap<object, RunScheduler>();
+
+export function runScheduler(limits?: SchedulerLimits) {
+  const database = currentDatabase();
+  let scheduler = schedulers.get(database);
+  if (!scheduler) {
+    scheduler = new RunScheduler(database, executeRun, limits);
+    schedulers.set(database, scheduler);
+  }
+  return scheduler;
+}
+
 export function enqueueRun(runId: string) {
-  setImmediate(() => void executeRun(runId));
+  const row = sqlite.prepare("SELECT provider FROM runs WHERE id = ?").get(runId) as
+    | { provider: ProviderId }
+    | undefined;
+  if (!row) return false;
+  return runScheduler().enqueue({ runId, provider: row.provider });
 }
 
 export function isRunExecuting(runId: string) {
@@ -1792,6 +2803,16 @@ export function cancelRun(runId: string) {
         controller ? null : cancelledAt,
         runId,
       );
+    if (!controller) {
+      sqlite
+        .prepare(
+          `UPDATE run_attempts SET status = 'cancelled', completed_at = ?
+           WHERE run_id = ? AND attempt_no = (
+             SELECT current_attempt FROM runs WHERE id = ?
+           )`,
+        )
+        .run(cancelledAt, runId, runId);
+    }
     event(
       runId,
       controller ? "run_cancel_requested" : "run_cancelled",
@@ -1806,14 +2827,75 @@ export function cancelRun(runId: string) {
   return "cancelled" as const;
 }
 
-export function recoverInterruptedRuns() {
+export function restartRun(runId: string, enqueue = true) {
+  const restarted = sqlite.transaction(() => {
+    const claimed = sqlite
+      .prepare(
+        `UPDATE runs
+         SET status = 'queued', current_attempt = current_attempt + 1,
+             progress = 0, current_stage = 'Warteschlange', error = NULL,
+             completed_at = NULL
+         WHERE id = ? AND status = 'failed' AND archived_at IS NULL`,
+      )
+      .run(runId);
+    if (claimed.changes !== 1) return null;
+    const row = sqlite
+      .prepare(
+        `SELECT r.*, d.name AS document_name, d.extracted_text,
+                d.status AS document_status, d.mime_type AS document_mime_type,
+                d.original AS document_original, d.sha256 AS document_sha256
+         FROM runs r JOIN documents d ON d.id = r.document_id WHERE r.id = ?`,
+      )
+      .get(runId) as RunRow;
+    const attempt = row.current_attempt;
+    const predecessorAttempt = attempt - 1;
+    const reusable = validCheckpoints(row, predecessorAttempt);
+    const inheritedPhases = PIPELINE_PHASES.filter((phase) => reusable.has(phase));
+    for (const phase of inheritedPhases) {
+      const checkpoint = reusable.get(phase);
+      if (!checkpoint) continue;
+      sqlite
+        .prepare(
+          `INSERT INTO run_checkpoints(
+             run_id, attempt_no, phase, checkpoint_version, input_hash,
+             output_refs_json, inherited_from_attempt, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          runId,
+          attempt,
+          phase,
+          checkpoint.checkpoint_version,
+          checkpoint.input_hash,
+          checkpoint.output_refs_json,
+          checkpoint.inherited_from_attempt ?? predecessorAttempt,
+          now(),
+        );
+    }
+    const resumeFrom = PIPELINE_PHASES[inheritedPhases.length] ?? "reports";
+    const startedAt = now();
+    sqlite
+      .prepare(
+        `INSERT INTO run_attempts(
+          run_id, attempt_no, status, started_at, predecessor_attempt, resume_phase
+        ) VALUES (?, ?, 'queued', ?, ?, ?)`,
+      )
+      .run(runId, attempt, startedAt, predecessorAttempt, resumeFrom);
+    return { attempt, resumeFrom: resumeFrom as PipelinePhase };
+  })();
+  if (!restarted) return null;
+  event(runId, "run_restarted", `Neustart als Versuch ${restarted.attempt} beansprucht`, {
+    attempt: restarted.attempt,
+    resumeFrom: restarted.resumeFrom,
+  });
+  if (enqueue) enqueueRun(runId);
+  return restarted;
+}
+
+export function recoverInterruptedRuns(schedule: (runId: string) => unknown = enqueueRun) {
   const interrupted = sqlite
     .prepare("SELECT id, current_stage FROM runs WHERE status = 'running'")
     .all() as Array<{ id: string; current_stage: string | null }>;
-  const resumableExtractions = interrupted.filter(
-    (run) => run.current_stage === "Dokumentextraktion",
-  );
-  const failedInterrupted = interrupted.filter((run) => run.current_stage !== "Dokumentextraktion");
   const queued = sqlite.prepare("SELECT id FROM runs WHERE status = 'queued'").all() as Array<{
     id: string;
   }>;
@@ -1822,7 +2904,7 @@ export function recoverInterruptedRuns() {
     .all() as Array<{ id: string }>;
   const recoveredAt = now();
   const transaction = sqlite.transaction(() => {
-    for (const run of resumableExtractions) {
+    for (const run of interrupted) {
       sqlite
         .prepare(
           "UPDATE run_stages SET status = 'cancelled', completed_at = ? WHERE run_id = ? AND status = 'running'",
@@ -1831,36 +2913,23 @@ export function recoverInterruptedRuns() {
       sqlite
         .prepare(
           `UPDATE runs SET status = 'queued', progress = 0,
-           current_stage = 'Dokumentextraktion wird fortgesetzt',
+           current_stage = 'Lauf wird fortgesetzt',
            error = NULL, completed_at = NULL WHERE id = ?`,
         )
         .run(run.id);
-      event(
-        run.id,
-        "document_extraction_resumed",
-        "Unterbrochene Dokumentextraktion wird aus gespeicherten Seiten fortgesetzt",
-        { recoveredAt },
-      );
-    }
-    for (const run of failedInterrupted) {
       sqlite
         .prepare(
-          "UPDATE run_stages SET status = 'failed', completed_at = ? WHERE run_id = ? AND status = 'running'",
+          `UPDATE run_attempts SET status = 'queued', completed_at = NULL, error = NULL
+           WHERE run_id = ? AND attempt_no = (
+             SELECT current_attempt FROM runs WHERE id = ?
+           )`,
         )
-        .run(recoveredAt, run.id);
-      sqlite
-        .prepare(
-          `UPDATE runs SET status = 'failed', current_stage = 'Unterbrochen',
-           error = 'Der Anwendungsprozess wurde während des Laufs neu gestartet.',
-           completed_at = ? WHERE id = ?`,
-        )
-        .run(recoveredAt, run.id);
+        .run(run.id, run.id);
       event(
         run.id,
-        "run_failed",
-        "Lauf durch Neustart des Anwendungsprozesses unterbrochen",
+        "run_recovered",
+        "Unterbrochener Attempt wird ab dem letzten gültigen Checkpoint fortgesetzt",
         { recoveredAt },
-        "error",
       );
     }
     for (const run of cancelling) {
@@ -1881,12 +2950,11 @@ export function recoverInterruptedRuns() {
     }
   });
   transaction();
-  for (const run of [...queued, ...resumableExtractions]) enqueueRun(run.id);
+  for (const run of [...queued, ...interrupted]) schedule(run.id);
   return {
-    interrupted: failedInterrupted.length,
-    resumedExtractions: resumableExtractions.length,
+    interrupted: interrupted.length,
     cancelled: cancelling.length,
-    resumedQueued: queued.length + resumableExtractions.length,
+    resumedQueued: queued.length + interrupted.length,
   };
 }
 
@@ -1896,7 +2964,9 @@ export async function generateAdditionalPresentation(runId: string, kind: Presen
       `SELECT r.*, d.name AS document_name, d.extracted_text,
        a.id AS artifact_id, a.content
        FROM runs r JOIN documents d ON d.id = r.document_id
-       JOIN artifacts a ON a.run_id = r.id AND a.kind = 'final' WHERE r.id = ?`,
+       JOIN artifacts a ON a.run_id = r.id AND a.attempt_no = r.current_attempt
+                        AND a.kind = 'final'
+       WHERE r.id = ?`,
     )
     .get(runId) as (RunRow & { artifact_id: string; content: string }) | undefined;
   if (!row) throw new Error("Finales Ergebnis ist noch nicht vorhanden.");
@@ -1949,7 +3019,7 @@ ${row.content}`,
   const workspaceKind = kind === "newspaper" ? "newspaper" : "visual-report";
   const result = await createPresentation({
     kind,
-    finalMarkdown: row.content,
+    finalMarkdown: kind === "text" ? finalSynthesisMarkdown(row.content) : row.content,
     reportPackage: assembly?.reportPackage,
     reportCss:
       kind === "text" || !assembly
@@ -1969,33 +3039,22 @@ ${row.content}`,
     onEvent: (piEvent) =>
       event(runId, piEvent.type, piEvent.message, piEvent.data, piEvent.level ?? "info"),
   });
-  const existing = sqlite
-    .prepare("SELECT id FROM presentations WHERE run_id = ? AND kind = ?")
-    .get(runId, kind) as { id: string } | undefined;
-  const id = existing?.id ?? nanoid();
-  const pages = (result.pages ?? []).map((page) => ({
-    ...page,
-    html: bindPresentationRoute(page.html, id),
-  }));
-  sqlite
-    .prepare(
-      `INSERT INTO presentations(
-        id, run_id, kind, title, html, source_artifact_id, pages_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(run_id, kind) DO UPDATE SET
-         title=excluded.title, html=excluded.html, pages_json=excluded.pages_json,
-         created_at=excluded.created_at`,
-    )
-    .run(
-      id,
-      runId,
-      kind,
-      result.title,
-      bindPresentationRoute(result.html, id),
-      row.artifact_id,
-      JSON.stringify(pages),
-      now(),
-    );
+  const id = persistPresentation({
+    runId,
+    attemptNo: row.current_attempt,
+    kind,
+    title: result.title,
+    sourceArtifactId: row.artifact_id,
+    render: (presentationId) => ({
+      html: bindPresentationRoute(result.html, presentationId),
+      pagesJson: JSON.stringify(
+        (result.pages ?? []).map((page) => ({
+          ...page,
+          html: bindPresentationRoute(page.html, presentationId),
+        })),
+      ),
+    }),
+  });
   event(runId, "presentation_completed", `${result.title} erzeugt`);
   sqlite
     .prepare("UPDATE runs SET progress = 100, current_stage = 'Abgeschlossen' WHERE id = ?")
@@ -2003,7 +3062,12 @@ ${row.content}`,
   return id;
 }
 
-export function resumeRunWithAnswer(runId: string, questionId: string, answer: string): boolean {
+export function resumeRunWithAnswer(
+  runId: string,
+  questionId: string,
+  answer: string,
+  enqueue = true,
+): boolean {
   const resumed = sqlite.transaction(() => {
     const run = sqlite.prepare("SELECT status FROM runs WHERE id = ?").get(runId) as
       | { status: string }
@@ -2023,6 +3087,14 @@ export function resumeRunWithAnswer(runId: string, questionId: string, answer: s
         "UPDATE runs SET focus = COALESCE(focus || '\n', '') || ?, status = 'queued' WHERE id = ?",
       )
       .run(`Antwort auf Rückfrage: ${answer}`, runId);
+    sqlite
+      .prepare(
+        `UPDATE run_attempts SET status = 'queued', resume_phase = 'routing-raci'
+         WHERE run_id = ? AND attempt_no = (
+           SELECT current_attempt FROM runs WHERE id = ?
+         )`,
+      )
+      .run(runId, runId);
     return true;
   })();
   if (!resumed) return false;
@@ -2030,6 +3102,6 @@ export function resumeRunWithAnswer(runId: string, questionId: string, answer: s
   event(runId, "input_answered", "Rückfrage beantwortet; Lauf wird neu aufgenommen", {
     questionId,
   });
-  enqueueRun(runId);
+  if (enqueue) enqueueRun(runId);
   return true;
 }

@@ -2,25 +2,22 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Api, AssistantMessage, ImageContent, Model } from "@earendil-works/pi-ai/compat";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   type AgentSessionEvent,
   AuthStorage,
   createAgentSession,
   DefaultResourceLoader,
+  defineTool,
   ModelRegistry,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { type TSchema, Type } from "typebox";
 import type { OpenRouterRoutingMode, ProviderId, ProviderModel } from "../shared/types.js";
 import { decryptSecret } from "./crypto.js";
 import { sqlite } from "./db/index.js";
 import { createWorkspaceReadEditTools, safeWorkspaceEventPath } from "./workspace-tools.js";
-
-const dataDir = process.env.DATA_DIR ?? path.resolve("data");
-const piDir = path.join(dataDir, "pi");
-fs.mkdirSync(piDir, { recursive: true });
-const persistentAuthPath = path.join(piDir, "auth.json");
-const userAuthPath = path.join(os.homedir(), ".pi", "agent", "auth.json");
 
 function hasStoredAuth(file: string) {
   try {
@@ -31,11 +28,27 @@ function hasStoredAuth(file: string) {
   }
 }
 
-const authPath =
-  !process.env.DATA_DIR && !hasStoredAuth(persistentAuthPath) && hasStoredAuth(userAuthPath)
+const authStores = new Map<string, AuthStorage>();
+
+function authStoragePath() {
+  const dataDir = process.env.DATA_DIR ?? path.resolve("data");
+  const persistentAuthPath = path.join(dataDir, "pi", "auth.json");
+  const userAuthPath = path.join(os.homedir(), ".pi", "agent", "auth.json");
+  return !process.env.DATA_DIR && !hasStoredAuth(persistentAuthPath) && hasStoredAuth(userAuthPath)
     ? userAuthPath
     : persistentAuthPath;
-export const authStorage = AuthStorage.create(authPath);
+}
+
+export function getAuthStorage() {
+  const authPath = authStoragePath();
+  let storage = authStores.get(authPath);
+  if (!storage) {
+    fs.mkdirSync(path.dirname(authPath), { recursive: true });
+    storage = AuthStorage.create(authPath);
+    authStores.set(authPath, storage);
+  }
+  return storage;
+}
 
 interface ProviderRow {
   provider: ProviderId;
@@ -164,6 +177,7 @@ export function providerRow(provider: ProviderId): ProviderRow {
 }
 
 function providerRegistry(): ModelRegistry {
+  const authStorage = getAuthStorage();
   authStorage.reload();
   const registry = ModelRegistry.inMemory(authStorage);
   const openRouter = providerRow("openrouter");
@@ -177,7 +191,8 @@ function providerRegistry(): ModelRegistry {
 export async function listModels(provider: ProviderId): Promise<ProviderModel[]> {
   if (provider === "aibox") {
     const row = providerRow("aibox");
-    const baseUrl = (row.base_url ?? "http://192.168.10.120:11434").replace(/\/$/, "");
+    const baseUrl = row.base_url?.trim().replace(/\/$/, "");
+    if (!baseUrl) return [];
     try {
       const response = await fetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(5_000) });
       if (!response.ok) throw new Error(String(response.status));
@@ -186,7 +201,8 @@ export async function listModels(provider: ProviderId): Promise<ProviderModel[]>
       const models = await Promise.all(
         (data.models ?? []).map(async (model) => {
           const info = await aiboxModelInfo(baseUrl, model.name);
-          if (info.capabilities && !info.capabilities.includes("completion")) return null;
+          if (!info.capabilities?.includes("completion") || !info.capabilities.includes("tools"))
+            return null;
           return {
             id: model.name,
             name: model.name,
@@ -198,6 +214,7 @@ export async function listModels(provider: ProviderId): Promise<ProviderModel[]>
             maximumContextWindow: info.maximumContextWindow,
             supportsReasoning: info.capabilities?.includes("thinking") ?? false,
             supportsVision: info.capabilities?.includes("vision") ?? false,
+            supportsTools: true,
           };
         }),
       );
@@ -236,8 +253,11 @@ export async function listModels(provider: ProviderId): Promise<ProviderModel[]>
           model.reasoning,
         supportsVision:
           live?.architecture?.input_modalities?.includes("image") ?? model.input.includes("image"),
+        supportsTools:
+          provider === "codex" ? true : live?.supported_parameters?.includes("tools") === true,
       };
-    });
+    })
+    .filter((model) => model.supportsTools);
 }
 
 export async function modelSupportsVision(provider: ProviderId, modelId: string) {
@@ -246,13 +266,200 @@ export async function modelSupportsVision(provider: ProviderId, modelId: string)
   return model?.supportsVision === true;
 }
 
+const TOOL_PROBE_SCHEMA_VERSION = 1;
+const TOOL_PROBE_TTL_MS = 24 * 60 * 60 * 1000;
+
+async function metadataSupportsTools(provider: ProviderId, modelId: string) {
+  if (provider === "aibox") {
+    const row = providerRow("aibox");
+    const baseUrl = row.base_url?.replace(/\/$/, "");
+    if (!baseUrl) return false;
+    return (await aiboxModelInfo(baseUrl, modelId)).capabilities?.includes("tools") === true;
+  }
+  if (provider === "openrouter") {
+    return (
+      (await openRouterCatalog()).get(modelId)?.supported_parameters?.includes("tools") === true
+    );
+  }
+  return (await listModels("codex")).some(
+    (model) => model.id === modelId && model.supportsTools === true,
+  );
+}
+
+export async function probeCouncilToolCapability(
+  provider: ProviderId,
+  modelId: string,
+  signal?: AbortSignal,
+) {
+  const row = providerRow(provider);
+  const endpoint =
+    provider === "codex"
+      ? "openai-codex"
+      : provider === "openrouter"
+        ? row.base_url || "https://openrouter.ai/api/v1"
+        : row.base_url || "";
+  if (!endpoint) {
+    throw new Error("Für die AI Box ist keine URL gesetzt.");
+  }
+  const cached = sqlite
+    .prepare(
+      `SELECT supported, error, checked_at FROM tool_capability_probes
+       WHERE provider = ? AND model = ? AND endpoint = ? AND schema_version = ?`,
+    )
+    .get(provider, modelId, endpoint, TOOL_PROBE_SCHEMA_VERSION) as
+    | { supported: number; error: string | null; checked_at: string }
+    | undefined;
+  if (cached && Date.now() - Date.parse(cached.checked_at) < TOOL_PROBE_TTL_MS) {
+    if (cached.supported) return true;
+    throw new Error(cached.error || "Das Modell hat den Council-Tool-Probe nicht bestanden.");
+  }
+
+  let supported = false;
+  let error: string | undefined;
+  try {
+    if (!(await metadataSupportsTools(provider, modelId))) {
+      throw new Error("Die Modellmetadaten weisen keinen Tool-Call-Support aus.");
+    }
+    const probe = await runPiStage({
+      provider,
+      modelId,
+      systemPrompt: "Du prüfst ausschließlich einen Tool-Aufruf.",
+      prompt: "Rufe jetzt genau einmal submit_capability_probe mit ok=true auf.",
+      signal,
+      toolMode: "output-tools",
+      outputTools: [
+        {
+          name: "submit_capability_probe",
+          description: "Bestätigt die Unterstützung strukturierter Council-Tools.",
+          parameters: Type.Object({ ok: Type.Literal(true) }, { additionalProperties: false }),
+        },
+      ],
+    });
+    supported =
+      probe.toolCalls.length === 1 &&
+      probe.toolCalls[0]?.name === "submit_capability_probe" &&
+      (probe.toolCalls[0].args as { ok?: unknown })?.ok === true;
+    if (!supported) error = "Das Modell hat den erforderlichen Probe-Tool-Aufruf nicht geliefert.";
+  } catch (cause) {
+    error = cause instanceof Error ? cause.message : String(cause);
+  }
+  sqlite
+    .prepare(
+      `INSERT INTO tool_capability_probes(
+        provider, model, endpoint, schema_version, supported, error, checked_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(provider, model, endpoint, schema_version) DO UPDATE SET
+        supported = excluded.supported, error = excluded.error, checked_at = excluded.checked_at`,
+    )
+    .run(
+      provider,
+      modelId,
+      endpoint,
+      TOOL_PROBE_SCHEMA_VERSION,
+      supported ? 1 : 0,
+      error ?? null,
+      new Date().toISOString(),
+    );
+  if (!supported) {
+    throw new Error(
+      `Modell ${provider}/${modelId} ist nicht Council-fähig: ${error ?? "Tool-Probe fehlgeschlagen."}`,
+    );
+  }
+  return true;
+}
+
 export interface PiStageResult {
   content: string;
   usage: { input: number; output: number; cost: number };
   events: Array<{ type: string; message: string; data?: unknown }>;
+  toolCalls: Array<{ name: string; callId: string; args: unknown }>;
 }
 
-export type PiToolMode = "read-edit";
+export interface OutputToolDefinition {
+  name: string;
+  description: string;
+  parameters: TSchema;
+}
+
+export type PiToolMode = "read-edit" | "output-tools";
+
+export function assertPiTurnHasOutput(content: string, toolCalls: PiStageResult["toolCalls"]) {
+  if (!content && toolCalls.length === 0) throw new Error("Die Modellantwort war leer.");
+}
+
+export class InferenceTimeoutError extends Error {
+  override name = "InferenceTimeoutError";
+  constructor(readonly timeoutMs: number) {
+    super(
+      `Die Modellinferenz hat das Zeitlimit von ${Math.round(timeoutMs / 60_000)} Minuten überschritten.`,
+    );
+  }
+}
+
+export interface RunPiStageOptions {
+  provider: ProviderId;
+  modelId: string;
+  systemPrompt: string;
+  prompt: string;
+  images?: ImageContent[];
+  signal?: AbortSignal;
+  workspaceDir?: string;
+  toolMode?: PiToolMode;
+  outputTools?: OutputToolDefinition[];
+  onEvent?: (event: { type: string; message: string; data?: unknown }) => void;
+  onStream?: (channel: "thinking" | "text", delta: string) => void;
+}
+
+const TERMINAL_PROVIDER_ERROR =
+  /(?:insufficient[_ -]?quota|out of budget|quota exceeded|billing|unauthori[sz]ed|forbidden|invalid api key|authentication|configuration)/i;
+const RETRYABLE_PROVIDER_ERROR =
+  /(?:\b408\b|\b429\b|\b5\d\d\b|rate.?limit|too many requests|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|fetch failed|upstream.?connect|reset before headers|socket hang up|timed? out|timeout|terminated)/i;
+
+export function isRetryableProviderError(error: unknown) {
+  if (
+    error instanceof InferenceTimeoutError ||
+    (error instanceof DOMException && error.name === "AbortError")
+  ) {
+    return false;
+  }
+  if (
+    error &&
+    typeof error === "object" &&
+    ("status" in error || "statusCode" in error) &&
+    Number.isInteger(
+      (error as { status?: unknown; statusCode?: unknown }).status ??
+        (error as { statusCode?: unknown }).statusCode,
+    )
+  ) {
+    const status = Number(
+      (error as { status?: unknown; statusCode?: unknown }).status ??
+        (error as { statusCode?: unknown }).statusCode,
+    );
+    const message = error instanceof Error ? error.message : String(error);
+    if (TERMINAL_PROVIDER_ERROR.test(message)) return false;
+    return status === 408 || status === 429 || status >= 500;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return !TERMINAL_PROVIDER_ERROR.test(message) && RETRYABLE_PROVIDER_ERROR.test(message);
+}
+
+export async function withProviderRetries<T>(
+  task: () => Promise<T>,
+  options: {
+    signal?: AbortSignal;
+    onRetry?: (attempt: number, error: unknown) => void;
+  } = {},
+) {
+  for (let retry = 0; ; retry += 1) {
+    try {
+      return await task();
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      if (retry >= 2 || !isRetryableProviderError(error)) throw error;
+      options.onRetry?.(retry + 1, error);
+    }
+  }
+}
 
 function safeEvent(event: AgentSessionEvent) {
   if (event.type === "message_update") return null;
@@ -262,26 +469,37 @@ function safeEvent(event: AgentSessionEvent) {
   return null;
 }
 
-export async function runPiStage(options: {
-  provider: ProviderId;
-  modelId: string;
-  systemPrompt: string;
-  prompt: string;
-  images?: ImageContent[];
-  signal?: AbortSignal;
-  workspaceDir?: string;
-  toolMode?: PiToolMode;
-  onEvent?: (event: { type: string; message: string; data?: unknown }) => void;
-  onStream?: (channel: "thinking" | "text", delta: string) => void;
-}): Promise<PiStageResult> {
+async function runPiStageAttempt(options: RunPiStageOptions): Promise<PiStageResult> {
   options.signal?.throwIfAborted();
-  if (Boolean(options.workspaceDir) !== Boolean(options.toolMode)) {
-    throw new Error("workspaceDir und toolMode müssen gemeinsam gesetzt werden.");
+  if (
+    (options.toolMode === "read-edit" && !options.workspaceDir) ||
+    (options.workspaceDir && options.toolMode !== "read-edit") ||
+    (options.toolMode === "output-tools" && !options.outputTools?.length) ||
+    (options.outputTools?.length && options.toolMode !== "output-tools")
+  ) {
+    throw new Error("Werkzeugmodus und Werkzeugdefinitionen passen nicht zusammen.");
   }
   const workspace =
     options.toolMode === "read-edit" && options.workspaceDir
       ? await createWorkspaceReadEditTools(options.workspaceDir)
       : undefined;
+  const capturedToolCalls: PiStageResult["toolCalls"] = [];
+  const outputTools = (options.outputTools ?? []).map((definition) =>
+    defineTool({
+      name: definition.name,
+      label: definition.name,
+      description: definition.description,
+      parameters: definition.parameters,
+      async execute(callId, args) {
+        capturedToolCalls.push({ name: definition.name, callId, args });
+        return {
+          content: [{ type: "text", text: `${definition.name} wurde entgegengenommen.` }],
+          details: {},
+        };
+      },
+    }),
+  ) as ToolDefinition[];
+  const customTools = workspace?.tools ?? outputTools;
   const sessionCwd = workspace?.root ?? process.cwd();
   const registry = providerRegistry();
   const providerName = options.provider === "codex" ? "openai-codex" : options.provider;
@@ -289,7 +507,8 @@ export async function runPiStage(options: {
 
   if (!model && options.provider === "aibox") {
     const row = providerRow("aibox");
-    const baseUrl = (row.base_url ?? "http://192.168.10.120:11434").replace(/\/$/, "");
+    const baseUrl = row.base_url?.trim().replace(/\/$/, "");
+    if (!baseUrl) throw new Error("Für die AI Box ist keine URL gesetzt.");
     const info = await aiboxModelInfo(baseUrl, options.modelId);
     options.signal?.throwIfAborted();
     const runningContext = (await aiboxRunningContexts(baseUrl)).get(options.modelId);
@@ -329,12 +548,14 @@ export async function runPiStage(options: {
 
   const settingsManager = SettingsManager.inMemory({
     compaction: { enabled: true, reserveTokens: 8_192, keepRecentTokens: 20_000 },
-    retry: { enabled: true, maxRetries: 2 },
+    // The application owns one retry budget around fresh, stateless sessions.
+    retry: { enabled: false, provider: { maxRetries: 0 } },
     hideThinkingBlock: true,
   });
+  const agentDir = path.dirname(authStoragePath());
   const resourceLoader = new DefaultResourceLoader({
     cwd: sessionCwd,
-    agentDir: piDir,
+    agentDir,
     settingsManager,
     noExtensions: true,
     noSkills: true,
@@ -348,14 +569,18 @@ export async function runPiStage(options: {
 
   const { session } = await createAgentSession({
     cwd: sessionCwd,
-    agentDir: piDir,
-    authStorage,
+    agentDir,
+    authStorage: getAuthStorage(),
     modelRegistry: registry,
     model,
     thinkingLevel: model.reasoning ? "high" : "off",
-    noTools: workspace ? "builtin" : "all",
-    tools: workspace ? ["read", "edit"] : undefined,
-    customTools: workspace?.tools,
+    noTools: customTools.length ? "builtin" : "all",
+    tools: workspace
+      ? ["read", "edit"]
+      : outputTools.length
+        ? outputTools.map((tool) => tool.name)
+        : undefined,
+    customTools: customTools.length ? customTools : undefined,
     sessionManager: SessionManager.inMemory(sessionCwd),
     settingsManager,
     resourceLoader,
@@ -392,6 +617,16 @@ export async function runPiStage(options: {
       options.onEvent?.(safe);
       return;
     }
+    if (options.toolMode === "output-tools" && event.type === "tool_execution_start") {
+      const safe = {
+        type: "council_tool_call",
+        message: `Council-Submit: ${event.toolName}`,
+        data: { name: event.toolName, callId: event.toolCallId, args: event.args },
+      };
+      captured.push(safe);
+      options.onEvent?.(safe);
+      return;
+    }
     if (workspace && event.type === "tool_execution_end") {
       const metadata = workspaceToolCalls.get(event.toolCallId);
       if (!metadata) return;
@@ -420,23 +655,47 @@ export async function runPiStage(options: {
 
   try {
     options.signal?.throwIfAborted();
-    await session.prompt(options.prompt, {
-      expandPromptTemplates: false,
-      source: "rpc",
-      images: options.images,
-    });
+    const timeoutMs = Number(process.env.PI_INFERENCE_TIMEOUT_MS ?? 15 * 60_000);
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const combinedSignal = options.signal
+      ? AbortSignal.any([options.signal, timeoutSignal])
+      : timeoutSignal;
+    const abortCombined = () => {
+      void session.abort().catch(() => {});
+    };
+    combinedSignal.addEventListener("abort", abortCombined, { once: true });
+    let promptError: unknown;
+    try {
+      try {
+        await session.prompt(options.prompt, {
+          expandPromptTemplates: false,
+          source: "rpc",
+          images: options.images,
+        });
+      } catch (error) {
+        promptError = error;
+      }
+    } finally {
+      combinedSignal.removeEventListener("abort", abortCombined);
+    }
+    if (timeoutSignal.aborted && !options.signal?.aborted) {
+      throw new InferenceTimeoutError(timeoutMs);
+    }
     options.signal?.throwIfAborted();
+    if (promptError) throw promptError;
     const message = [...session.messages].reverse().find((entry) => entry.role === "assistant") as
       | AssistantMessage
       | undefined;
     if (!message) throw new Error("Das Modell hat keine Antwort geliefert.");
-    if (message.errorMessage) throw new Error(message.errorMessage);
+    if (message.stopReason === "error") {
+      throw new Error(message.errorMessage || "Der Provider hat die Inferenz abgebrochen.");
+    }
     const content = message.content
       .filter((item) => item.type === "text")
       .map((item) => (item.type === "text" ? item.text : ""))
       .join("\n")
       .trim();
-    if (!content) throw new Error("Die Modellantwort war leer.");
+    assertPiTurnHasOutput(content, capturedToolCalls);
     return {
       content,
       usage: {
@@ -445,6 +704,7 @@ export async function runPiStage(options: {
         cost: message.usage.cost.total,
       },
       events: captured,
+      toolCalls: capturedToolCalls,
     };
   } finally {
     options.signal?.removeEventListener("abort", abortSession);
@@ -453,7 +713,27 @@ export async function runPiStage(options: {
   }
 }
 
+export async function runPiStage(options: RunPiStageOptions): Promise<PiStageResult> {
+  if (process.env.VITEST) {
+    throw new Error(
+      "Live AI inference is disabled in automated tests (Vitest). A specific manual acceptance run requires an explicit user request.",
+    );
+  }
+  return withProviderRetries(() => runPiStageAttempt(options), {
+    signal: options.signal,
+    onRetry: (attempt, error) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      options.onEvent?.({
+        type: "provider_retry",
+        message: `Provider-Anfrage wird nach einem vorübergehenden Fehler erneut versucht (${attempt}/2)`,
+        data: { attempt, maxRetries: 2, reason },
+      });
+    },
+  });
+}
+
 export function codexAuthStatus() {
+  const authStorage = getAuthStorage();
   authStorage.reload();
   return authStorage.getAuthStatus("openai-codex");
 }

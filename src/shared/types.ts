@@ -47,6 +47,7 @@ export interface RunRecord {
   createdAt: string;
   completedAt?: string | null;
   archivedAt?: string | null;
+  currentAttempt: number;
 }
 
 export interface RunEvent {
@@ -58,6 +59,8 @@ export interface RunEvent {
   message: string;
   data?: unknown;
   createdAt: string;
+  attemptNo: number;
+  originAttempt?: number;
 }
 
 export interface ArtifactRecord {
@@ -67,7 +70,12 @@ export interface ArtifactRecord {
   kind: string;
   title: string;
   contentType: string;
-  content: string;
+  attemptNo: number;
+  originAttempt?: number;
+  role?: string | null;
+  phase?: string;
+  size?: number;
+  content?: string;
   contentHtml?: string;
   sha256: string;
   metadata?: unknown;
@@ -80,9 +88,11 @@ export interface RunStageRecord {
   name: string;
   role?: string | null;
   status: "running" | "completed" | "failed" | "cancelled";
-  thinkingText: string;
-  outputText: string;
-  outputHtml: string;
+  attemptNo: number;
+  originAttempt?: number;
+  thinkingText?: string;
+  outputText?: string;
+  outputHtml?: string;
   inputTokens: number;
   outputTokens: number;
   costMicros: number;
@@ -95,8 +105,11 @@ export interface PresentationRecord {
   runId: string;
   kind: PresentationKind;
   title: string;
-  html: string;
-  pages: PresentationPage[];
+  attemptNo: number;
+  originAttempt?: number;
+  html?: string;
+  pages?: PresentationPage[];
+  pageCount?: number;
   createdAt: string;
 }
 
@@ -108,11 +121,23 @@ export interface PresentationPage {
 
 export interface RunDetails {
   run: RunRecord;
+  attempt: RunAttemptRecord;
+  attempts: RunAttemptRecord[];
   stages: RunStageRecord[];
   events: RunEvent[];
   artifacts: ArtifactRecord[];
   presentations: PresentationRecord[];
   question?: { id: string; prompt: string } | null;
+}
+
+export interface RunAttemptRecord {
+  attempt: number;
+  status: RunStatus;
+  startedAt: string;
+  completedAt?: string | null;
+  error?: string | null;
+  predecessorAttempt?: number | null;
+  resumePhase?: string | null;
 }
 
 export interface ReviewRecord {
@@ -128,6 +153,7 @@ export interface ReviewRecord {
 export interface DerivedAnalysisRecord {
   id: string;
   runId: string;
+  attemptNo?: number;
   kind: "top10_next_steps";
   status: "queued" | "running" | "ready" | "failed" | "cancelled";
   provider: ProviderId;
@@ -154,6 +180,7 @@ export interface ProviderModel {
   outputPricePerMillion?: number;
   supportsReasoning?: boolean;
   supportsVision?: boolean;
+  supportsTools?: boolean;
 }
 
 export interface ComparisonRecord {

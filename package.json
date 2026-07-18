@@ -1,13 +1,14 @@
 {
   "name": "qa-council",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Auditable multi-role QA reviews with Pi",
-  "main": "dist/server/index.js",
+  "main": "dist/server/server/server.js",
   "scripts": {
     "test": "vitest run",
-    "dev": "concurrently -k -n api,web \"API_PORT=3001 tsx watch src/server/index.ts\" \"vite --host 0.0.0.0\"",
+    "test:gui": "node test/gui-smoke.mjs",
+    "dev": "concurrently -k -n api,web \"API_PORT=3001 tsx watch src/server/server.ts\" \"vite --host 0.0.0.0\"",
     "build": "tsc -p tsconfig.server.json && vite build",
-    "start": "node dist/server/server/index.js",
+    "start": "node dist/server/server/server.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
     "lint": "biome check .",
     "format": "biome format --write .",
@@ -17,13 +18,6 @@
   "keywords": [],
   "author": "",
   "license": "MIT",
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "11.13.1",
-      "onFail": "download"
-    }
-  },
   "type": "module",
   "dependencies": {
     "@earendil-works/pi-ai": "^0.80.7",
@@ -40,6 +34,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "sanitize-html": "^2.17.6",
+    "typebox": "1.1.38",
     "typescript-compiler": "npm:typescript@5.9.3",
     "zod": "^4.4.3"
   },
@@ -60,5 +55,6 @@
     "typescript": "^7.0.2",
     "vite": "^8.1.4",
     "vitest": "^4.1.10"
-  }
+  },
+  "packageManager": "pnpm@11.13.1+sha512.b2fc7683b8a6525414e7d13e1ba28caaddde96bf66ec540bfaeb7e702b81f3e0be4d1f295edf7f9fe0396740a8dce4509c582ddf79891f4543fea32d37645f25"
 }

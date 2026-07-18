@@ -35,7 +35,10 @@ resources/skills/          Hash-geprüfter Report-Designer-Skill
 src/shared/                Gemeinsame API- und Domänentypen
 src/server/                Fastify, Datenbank, Extraktion und Orchestrierung
 src/server/db/             Drizzle-Schema und SQLite-Initialisierung
-src/web/                   React-Anwendung und Gestaltung
+src/web/                   React-App-Shell, gemeinsame Webmodule und Gestaltung
+src/web/components/        Eigenständige Haupt-, Detail- und Reader-Ansichten
+src/web/lib/               API, Markdown-, Status- und Systemevent-Helfer
+test/fixtures/             Kanonische lokale Test- und GUI-Dokumente
 .forgejo/workflows/        Build-, Prüf- und Container-Workflow
 docs/                      Projektdokumentation
 ```
@@ -74,12 +77,15 @@ Die Datei liegt unter `${DATA_DIR}/qa-council.sqlite`. SQLite läuft im WAL-Modu
 | `documents` | Original-BLOB, extrahierter Text, MIME-Typ, Größe und Hash |
 | `document_chunks` | Vollständige, geordnete Textabschnitte mit Locator und Hash |
 | `runs` | Konfiguration, Status und Fortschritt eines Council-Laufs |
+| `run_attempts` | Unveränderliche Versuche mit Vorgänger und Wiedereinstiegsphase |
+| `run_checkpoints` | Versionierte Phasen-Checkpoints mit Input-Hash und Output-Referenzen |
 | `comparisons` | Gemeinsame Quelle und Konfiguration eines getrennten Providervergleichs |
-| `run_stages` | Einzelne Modellstufen, Tokenverbrauch, Kosten und Prompt-Hash |
+| `run_stages` | Attemptgebundene Modellstufen, Tokenverbrauch, Kosten und Prompt-Hash |
 | `run_questions` | Ground-or-Ask-Rückfragen und Antworten |
 | `artifacts` | Virtuelle Review-, Debate-, Synthese- und Finaldateien |
-| `events` | Zeitlich geordnetes Detailprotokoll |
-| `presentations` | Bereinigtes HTML der drei Ergebnisdarstellungen einschließlich Zeitungs-Unterseiten |
+| `events` | Attemptgebundenes, zeitlich geordnetes Detailprotokoll |
+| `presentations` | Attemptgebundenes HTML einschließlich Zeitungs-Unterseiten |
+| `tool_capability_probes` | 24-Stunden-Cache der Council-Tool-Probes |
 | `provider_settings` | Modellwahl, Endpunkte und verschlüsselte API-Keys |
 | `app_settings` | Globale Anwendungseinstellungen |
 
@@ -91,13 +97,17 @@ Provider-Keys werden mit AES-256-GCM verschlüsselt. Ohne gesetzten `SETTINGS_EN
 |---|---|---|
 | `GET` | `/api/health` | Readiness- und Liveness-Prüfung |
 | `GET` | `/api/documents` | Dokumentliste |
-| `POST` | `/api/documents` | Datei hochladen und extrahieren |
+| `POST` | `/api/documents` | Datei ohne sofortige Extraktion hochladen |
 | `GET` | `/api/documents/:id` | Dokumentmetadaten und extrahierten Inhalt laden |
 | `GET` | `/api/documents/:id/download` | Gespeichertes Original laden |
 | `DELETE` | `/api/documents/:id` | Dokument einschließlich abhängiger Daten löschen |
 | `GET` | `/api/runs` | Normale Laufhistorie ohne Vergleichsläufe |
 | `POST` | `/api/runs` | Neuen Council-Lauf starten |
-| `GET` | `/api/runs/:id` | Lauf, Events, Artefakte, Fragen und Präsentationen |
+| `GET` | `/api/runs/:id?attempt=N` | Kleine Run-/Attempt-/Stage-/Datei-/Presentation-Summary |
+| `GET` | `/api/runs/:id/activity?attempt=N&afterEventId=X` | Cursorbasiertes Live-Protokoll |
+| `GET` | `/api/runs/:id/files?attempt=N&kind=…` | Dateimetadaten und Workflowphase |
+| `GET` | `/api/runs/:id/files/:artifactId` | Lazy Dateiinhalt und sanitisiertes Markdown |
+| `POST` | `/api/runs/:id/restart` | Fehlgeschlagenen Lauf atomar neu starten |
 | `PUT` | `/api/runs/archive-all` | Alle fertigen und fehlgeschlagenen aktiven Läufe archivieren |
 | `PUT` | `/api/runs/:id/archive` | Einzelnen Lauf archivieren oder wiederherstellen |
 | `DELETE` | `/api/runs/:id` | Fehlgeschlagenen Lauf löschen |
@@ -106,6 +116,7 @@ Provider-Keys werden mit AES-256-GCM verschlüsselt. Ohne gesetzten `SETTINGS_EN
 | `GET` | `/api/comparisons/:id` | Einen Vergleich direkt und reload-sicher laden |
 | `POST` | `/api/comparisons` | Erreichbare Provider-/Modellkombinationen parallel starten |
 | `POST` | `/api/runs/:id/presentations` | Zusätzliche Darstellung erzeugen |
+| `GET` | `/api/presentations/:id` | Vollständiges Presentation-HTML und Seiten |
 | `GET` | `/api/runs/:id/download` | Finales Ergebnis als Markdown herunterladen |
 | `GET` | `/api/presentations/:id/pdf` | Visual Report als mehrseitiges PDF laden |
 | `GET` | `/api/providers/:provider/models` | Verfügbare Modelle abrufen |
@@ -117,7 +128,10 @@ Provider-Keys werden mit AES-256-GCM verschlüsselt. Ohne gesetzten `SETTINGS_EN
 ## Sicherheitsgrenzen
 
 - Hochgeladene Inhalte gelten als nicht vertrauenswürdige Daten, nicht als Agentenanweisungen.
-- Pi-Sessions erhalten keine Datei-, Shell- oder sonstigen Werkzeuge.
+- Fachreview-Sessions erhalten keine Datei-, Shell- oder sonstigen Werkzeuge.
+- Strukturierte Supervisor-Sessions erhalten ausschließlich das jeweils erlaubte Submit-Tool.
+- Report-Designer-Sessions erhalten ausschließlich isolierte `read`-/`edit`-Werkzeuge im
+  temporären Report-Workspace.
 - Jede Session verwendet `SessionManager.inMemory()`.
 - Pi-Kontextkompaktierung ist aktiviert; jede fachliche Modellstufe bleibt eine eigene In-Memory-Session mit vollständig neu geladenen, hash-geprüften Skillregeln.
 - Systemprompts werden ausschließlich aus hash-geprüften Projektquellen erzeugt.

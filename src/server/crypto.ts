@@ -25,8 +25,28 @@ export function encryptSecret(value: string): string {
 
 export function decryptSecret(value: string | null | undefined): string | undefined {
   if (!value) return undefined;
-  const [iv, tag, encrypted] = value.split(".").map((part) => Buffer.from(part, "base64url"));
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key(), iv);
-  decipher.setAuthTag(tag);
-  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
+  try {
+    const parts = value.split(".");
+    if (parts.length !== 3) throw new Error("Ungültiges Secret-Format.");
+    const [iv, tag, encrypted] = parts.map((part) => Buffer.from(part, "base64url")) as [
+      Buffer,
+      Buffer,
+      Buffer,
+    ];
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key(), iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
+  } catch {
+    warnDecryptOnce();
+    return undefined;
+  }
+}
+
+let decryptWarningWritten = false;
+function warnDecryptOnce() {
+  if (decryptWarningWritten) return;
+  decryptWarningWritten = true;
+  console.warn(
+    "[qa-council] Ein gespeichertes Secret konnte nicht entschlüsselt werden; Environment-Fallbacks bleiben aktiv.",
+  );
 }

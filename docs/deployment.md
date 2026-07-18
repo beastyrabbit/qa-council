@@ -1,5 +1,10 @@
 # Deployment
 
+> Release 0.3.0 benötigt vor dem Rollout einen verifizierten Longhorn-VolumeSnapshot. Die
+> Recreate-Strategie muss verhindern, dass zwei Pods gleichzeitig die SQLite-Migration ausführen.
+> Bei Migrationsproblemen: Deployment stoppen, PVC aus dem Snapshot wiederherstellen und erst
+> danach das 0.2.1-Image setzen. Ein reiner Image-Rollback ist nicht ausreichend.
+
 ## Zielumgebung
 
 - Forgejo-Repository und Image: `git.heerlab.com/beasty/qa-council`
@@ -24,6 +29,7 @@ Der Workflow `.forgejo/workflows/ci.yaml` besitzt zwei Jobs:
 
 - Checkout
 - pnpm über Corepack
+- Cache des von `pnpm store path` gelieferten Stores mit Betriebssystem und Lockfile-Hash
 - reproduzierbare Installation mit Lockfile
 - `pnpm check`
 
@@ -109,8 +115,8 @@ lefthook run pre-commit
 
 1. Anwendungsrepository nach Forgejo pushen.
 2. Erfolgreichen Quality- und Container-Job abwarten.
-3. Einen Git-Tag und Forgejo-Release wie `v0.1.0` erstellen und prüfen, dass
-   `git.heerlab.com/beasty/qa-council:0.1.0` verfügbar ist.
+3. Den Git-Tag und Forgejo-Release `v0.3.0` erstellen und prüfen, dass
+   `git.heerlab.com/beasty/qa-council:0.3.0` verfügbar ist.
 4. Den unveränderlichen SemVer-Tag im HelmRelease eintragen und den GitOps-Commit pushen.
 5. Flux synchronisieren:
 

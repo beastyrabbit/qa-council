@@ -12,7 +12,8 @@ function schema(database: Database.Database) {
     CREATE TABLE runs (
       id TEXT PRIMARY KEY,
       provider TEXT NOT NULL,
-      model TEXT NOT NULL
+      model TEXT NOT NULL,
+      current_attempt INTEGER NOT NULL DEFAULT 1
     );
     CREATE TABLE run_stages (
       id TEXT PRIMARY KEY,
@@ -21,6 +22,7 @@ function schema(database: Database.Database) {
     CREATE TABLE artifacts (
       id TEXT PRIMARY KEY,
       run_id TEXT NOT NULL,
+      attempt_no INTEGER NOT NULL DEFAULT 1,
       stage_id TEXT,
       kind TEXT NOT NULL,
       title TEXT NOT NULL,
@@ -31,6 +33,7 @@ function schema(database: Database.Database) {
     CREATE TABLE derived_analyses (
       id TEXT PRIMARY KEY,
       run_id TEXT NOT NULL,
+      attempt_no INTEGER NOT NULL DEFAULT 1,
       kind TEXT NOT NULL,
       status TEXT NOT NULL,
       provider TEXT NOT NULL,
@@ -128,6 +131,7 @@ describe("abgeleitete Top-10-Analyse", () => {
         content: validTop10(),
         usage: { input: 100, output: 200, cost: 0 },
         events: [],
+        toolCalls: [],
       } satisfies PiStageResult;
     });
     const service = createDerivedAnalysisService({
@@ -231,6 +235,7 @@ describe("abgeleitete Top-10-Analyse", () => {
         content: validTop10().replace("## 10.", "### 10."),
         usage: { input: 1, output: 1, cost: 0 },
         events: [],
+        toolCalls: [],
       }),
       createId: () => "analysis-invalid",
     });
@@ -240,6 +245,29 @@ describe("abgeleitete Top-10-Analyse", () => {
 
     expect(failed?.status).toBe("failed");
     expect(failed?.error).toContain("genau die Überschriften ## 1 bis ## 10");
+  });
+
+  it("liest standardmäßig nur die aktuelle Analyse und kann ältere Attempts gezielt öffnen", () => {
+    const database = testDatabase();
+    database.prepare("UPDATE runs SET current_attempt = 2 WHERE id = 'run-1'").run();
+    const insert = database.prepare(
+      `INSERT INTO derived_analyses(
+         id, run_id, attempt_no, kind, status, provider, model, source_artifact_id,
+         source_refs_json, output_text, created_at
+       ) VALUES (?, 'run-1', ?, ?, 'ready', 'codex', 'gpt-test', 'final-a', '[]', ?, ?)`,
+    );
+    insert.run("analysis-old", 1, TOP10_ANALYSIS_KIND, "Alter Versuch", "2026-01-01T00:00:01.000Z");
+    insert.run(
+      "analysis-current",
+      2,
+      TOP10_ANALYSIS_KIND,
+      "Aktueller Versuch",
+      "2026-01-01T00:00:02.000Z",
+    );
+    const service = createDerivedAnalysisService({ database });
+
+    expect(service.getLatest("run-1")?.id).toBe("analysis-current");
+    expect(service.getLatest("run-1", TOP10_ANALYSIS_KIND, 1)?.id).toBe("analysis-old");
   });
 });
 

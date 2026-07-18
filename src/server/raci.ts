@@ -216,17 +216,22 @@ export function compileRaciAssignments(
       }
     }
     const roleAliases = new Map<string, QaRole>([
-      ["qa architect", "QA-Architekt"],
-      ["test manager", "Test-Manager"],
-      ["test analyst", "Test-Analyst"],
-      ["test automation engineer", "Test-Automation-Engineer"],
+      ["qaarchitect", "QA-Architekt"],
+      ["testmanager", "Test-Manager"],
+      ["testanalyst", "Test-Analyst"],
+      ["tester", "Tester"],
+      ["testautomationengineer", "Test-Automation-Engineer"],
     ]);
+    const normalizeAlias = (value: unknown) =>
+      String(value)
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_-]+/g, "");
     const consultants = Array.isArray(proposal.consultants)
       ? [
           ...new Set(
             proposal.consultants.map(
-              (consultant) =>
-                roleAliases.get(String(consultant).trim().toLowerCase()) ?? consultant,
+              (consultant) => roleAliases.get(normalizeAlias(consultant)) ?? consultant,
             ),
           ),
         ]

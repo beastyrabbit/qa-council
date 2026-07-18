@@ -43,10 +43,18 @@ describe("persistenter Report-Arbeitsbereich", () => {
     expect(reportWorkspacePath("run-42")).toBe(files.root);
     expect(files.newspaper.html).toContain("<newspaper>");
     expect(files.newspaper.html).toContain('slug="synthese"');
+    expect(files.newspaper.html).toContain('class="news-pass"');
     expect(files.newspaper.css).toContain(".news-hero__headline");
+    expect(files.newspaper.css).toContain("--news-pine: #1f362c");
+    expect(files.newspaper.css).toContain("--news-ember: #d9704f");
+    expect(files.newspaper.css).toContain("@media (prefers-reduced-motion: reduce)");
     expect(files.newspaper.manifest).toContain("export const reportManifest");
     expect(files.visualReport.html).toContain("visual-matrix");
+    expect(files.visualReport.html).toContain('class="visual-composer"');
     expect(files.visualReport.css).toContain(".visual-chart");
+    expect(files.visualReport.css).toContain("--visual-oat: #fbf4ea");
+    expect(files.visualReport.css).toContain("--visual-teal: #2ba394");
+    expect(files.visualReport.css).toContain("@media (prefers-reduced-motion: reduce)");
     expect(files.visualReport.manifest).toContain('kind: "visual-report"');
   });
 
@@ -126,8 +134,8 @@ describe("persistenter Report-Arbeitsbereich", () => {
     expect(result.reportPackage).toContain("<onepaper>");
     expect(result.reportPackage.match(/\{\{EDITORIAL_IMAGE\}\}/g)).toHaveLength(2);
     expect(validateReportPackage(result.reportPackage, ["synthese"]).valid).toBe(true);
-    expect(result.styles.newspaper).toContain("--news-red");
-    expect(result.styles.visualReport).toContain("--visual-lime");
+    expect(result.styles.newspaper).toContain("--news-pine");
+    expect(result.styles.visualReport).toContain("--visual-oat");
     expect(result.imageSlots).toHaveLength(4);
     expect(result.imageSlots.filter((image) => image.kind === "visual-report")).toHaveLength(3);
     expect(result.reportPackage).toContain("{{REPORT_IMAGE_EVIDENCE}}");

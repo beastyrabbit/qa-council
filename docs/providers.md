@@ -1,5 +1,12 @@
 # Provider und Modelle
 
+> Seit 0.3.0 werden nur Council-Modelle angeboten, deren Metadaten Tool-Support ausweisen:
+> OpenRouter benötigt `tools` in `supported_parameters`, Ollama/AI Box `tools` in
+> `/api/show`, Codex Custom-Tool-Support. Vor der ersten Verwendung läuft zusätzlich ein echter
+> Submit-Probe; das Ergebnis wird 24 Stunden je Provider, Modell, Endpoint und Schema-Version
+> gecached. Supervisor-Stufen erhalten ausschließlich ihr Submit-Tool, nie allgemeine
+> Agentenwerkzeuge. Der Inference-Timeout beträgt standardmäßig 15 Minuten.
+
 Die Provider-Einstellungen befinden sich in der Weboberfläche unter **Einstellungen**. Für jeden Provider kann die Modellliste über das Suchfeld direkt oberhalb des Dropdowns nach Name oder ID gefiltert und ein Standardmodell gespeichert werden. Dieselbe durchsuchbare Auswahl steht für jeden Anbieter im Testmodus separat bereit.
 
 ## Serverseitiges Codex
@@ -33,7 +40,7 @@ Pfad: /kubernetes/tools/qa-council-secret
 
 ## Lokale AI Box
 
-Standardadresse:
+Beispieladresse; ohne konfigurierte URL bleibt die AI Box deaktiviert:
 
 ```text
 http://192.168.10.120:11434
@@ -68,7 +75,7 @@ Bildquelle wird automatisch nach dem Textprovider gewählt:
   **HTML / Nur Text** als Startansicht gewählt ist, weil Tageszeitung und Visual Report trotzdem im selben
   Lauf entstehen.
 
-Standardadresse:
+Beispieladresse; ohne konfigurierte URL bleibt ComfyUI deaktiviert:
 
 ```text
 http://192.168.10.120:8188

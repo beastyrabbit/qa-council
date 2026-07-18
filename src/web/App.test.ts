@@ -23,4 +23,12 @@ describe("persistente Frontend-Routen", () => {
       runId: "run-1",
     });
   });
+
+  it("erkennt reload-sichere Dateirouten mit Attempt", () => {
+    expect(routeFromPath("/laeufe/run-1/dateien/art-2", "?attempt=3")).toMatchObject({
+      fileRunId: "run-1",
+      artifactId: "art-2",
+      fileAttempt: 3,
+    });
+  });
 });

@@ -131,11 +131,14 @@ function parseReportPackage(value: string) {
 
 const sectionRoutes: Record<string, { slug: string; title: string }> = {
   "Finale Synthese": { slug: "synthese", title: "Entscheidung" },
-  "Triage, Scope und RACI": { slug: "triage", title: "Triage & RACI" },
+  "Triage und RACI": { slug: "triage", title: "Triage & RACI" },
   "Isolierte Einzelreviews": { slug: "fachreviews", title: "Fachreviews" },
   "Cross-Reviews": { slug: "cross-reviews", title: "Cross-Reviews" },
+  "Gemeinsames Review": { slug: "gemeinsames-review", title: "Gemeinsames Review" },
   Debattenprotokoll: { slug: "debatte", title: "Debatte" },
-  "Nachweis der vollständigen Dokumentverarbeitung": {
+  "Council-Runden": { slug: "council-runden", title: "Council-Runden" },
+  "Dissent-Audit": { slug: "dissent-audit", title: "Dissent-Audit" },
+  Abdeckungsmanifest: {
     slug: "nachweis",
     title: "Nachweis",
   },
@@ -182,6 +185,18 @@ export function splitNewspaperSections(markdown: string): NewspaperSection[] {
   });
 }
 
+export function finalSynthesisMarkdown(markdown: string) {
+  const heading = "## Finale Synthese";
+  const start = markdown.indexOf(heading);
+  if (start < 0) return markdown;
+  const bodyStart = start + heading.length;
+  const rest = markdown.slice(bodyStart);
+  const next = rest.search(/\n## (?!#)/);
+  const body = (next >= 0 ? rest.slice(0, next) : rest).trim();
+  const title = markdown.match(/^#\s+.+$/m)?.[0] ?? "# QA-Council-Ergebnis";
+  return `${title}\n\n${heading}\n\n${body}\n`;
+}
+
 function newspaperNav(sections: NewspaperSection[], activeSlug: string) {
   const items = [{ slug: "", title: "Titelseite" }, ...sections];
   return `<nav class="newspaper-nav" aria-label="Zeitungsressorts">${items
@@ -206,9 +221,9 @@ function shell(
   const masthead =
     kind === "newspaper"
       ? `<header class="result__masthead newspaper-masthead">
+          <a href="${RESULT_BASE}">QA Council</a>
           <span>Qualität · Risiko · Entscheidung</span>
-          <a href="${RESULT_BASE}">QA REPORT</a>
-          <time>${date}</time>
+          <time>Bericht · ${date}</time>
         </header>
         ${newspaperNav(newspaperSections, activeSlug)}
         <div class="newspaper-context">${safeTitle}</div>`
@@ -417,7 +432,7 @@ export async function createPresentation(options: {
           "newspaper",
           options.documentName,
           `${applyImages(layoutHtml(page.html))}
-         <footer class="newspaper-page-footer"><a href="${RESULT_BASE}">← Zur Titelseite</a><span>QA REPORT · ${escapeHtml(
+         <footer class="newspaper-page-footer"><a href="${RESULT_BASE}">← Zur Titelseite</a><span>QA Council · ${escapeHtml(
            options.documentName,
          )}</span></footer>`,
           navigationSections,

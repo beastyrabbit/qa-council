@@ -17,7 +17,7 @@ portless
 Portless startet das `dev`-Script. Die API hört lokal fest auf Port 3001, Vite übernimmt den von Portless vergebenen Anwendungsport. Die stabile Adresse lautet je nach laufender Portless-Konfiguration beispielsweise:
 
 ```text
-https://qa-council.localhost:1355
+http://qa-council.localhost:1355
 ```
 
 Ohne Portless kann `pnpm dev` verwendet werden; Vite läuft dann standardmäßig auf Port 5173.
@@ -42,9 +42,13 @@ docker compose up --build
 | `API_PORT` | nicht gesetzt | expliziter API-Port für den Entwicklungsmodus |
 | `DATA_DIR` | `./data` | SQLite, Verschlüsselungsschlüssel und Pi-Auth |
 | `TIKA_URL` | `http://127.0.0.1:9998` | Apache-Tika-Basisadresse |
-| `AIBOX_URL` | `http://192.168.10.120:11434` | lokale Ollama-kompatible AI Box |
-| `COMFYUI_URL` | `http://192.168.10.120:8188` | lokale ComfyUI-Basisadresse |
-| `COMFYUI_CHECKPOINT` | `anima-base-v1.0.safetensors` | vorausgewählter ComfyUI-Checkpoint |
+| `AIBOX_URL` | nicht gesetzt | lokale Ollama-kompatible AI Box |
+| `COMFYUI_URL` | nicht gesetzt | lokale ComfyUI-Basisadresse |
+| `COMFYUI_CHECKPOINT` | nicht gesetzt | vorausgewählter ComfyUI-Checkpoint |
+| `PI_INFERENCE_TIMEOUT_MS` | `900000` | Zeitlimit einer Pi-Inferenz |
+| `RUN_SLOTS` | `3` | global gleichzeitig aktive Läufe |
+| `CODEX_RUN_SLOTS` / `OPENROUTER_RUN_SLOTS` / `AIBOX_RUN_SLOTS` | `2` / `2` / `1` | providerbezogene Run-Limits |
+| `CODEX_INFERENCE_SLOTS` / `OPENROUTER_INFERENCE_SLOTS` / `AIBOX_INFERENCE_SLOTS` | `6` / `6` / `2` | providerbezogene Inference-Limits |
 | `OPENROUTER_API_KEY` | nicht gesetzt | OpenRouter-Zugang |
 | `OPENAI_API_KEY` | nicht gesetzt | Native OpenAI-Bildgenerierung für Codex-Läufe |
 | `SETTINGS_ENCRYPTION_KEY` | lokales Schlüssel-File | Schlüsselmaterial für gespeicherte Provider-Keys |
@@ -64,6 +68,18 @@ Der Befehl führt aus:
 4. Produktionsbuild
 
 Vor Commits führt Lefthook zusätzlich Gitleaks aus.
+
+`pnpm test:gui` ist ein manueller lokaler Chromium-Test gegen einen laufenden Server. Optionale
+`GUI_*`-IDs erweitern ihn um vorhandene Runs, Presentations und Vergleiche. Er ist bewusst nicht
+Teil des CI-Quality-Jobs, startet keine Analyse und lädt Provider-Modellkataloge erst nach einer
+bewussten Interaktion. Das kanonische Upload-Fixture liegt unter
+`test/fixtures/gui-council-input.md`.
+
+Automatische Tests bleiben vollständig offline: Sie entfernen Provider-Schlüssel aus dem
+Testprozess, blockieren Live-Provider und dürfen keine KI-Analyse starten. Jeder Token kostet Geld;
+deshalb ist höchstens ein manueller Live-Abnahmelauf zulässig, und auch nur nach einer
+ausdrücklichen Benutzeranweisung für genau diesen Lauf. OpenRouter wird ausschließlich nach einer
+ausdrücklichen OpenRouter-Anweisung getestet.
 
 ## Daten und Backups
 
@@ -111,14 +127,18 @@ Dies ist kein Fehler. Auf der Vollseiten-Laufansicht steht die konkrete Ground-o
 
 ## Laufprotokoll, Archiv und Ergebnisse
 
-- Die Route `/runs/<run-id>` ist direkt aufrufbar und zeigt den vollständigen Text jeder Modellstufe live. Text- und Thinking-Deltas werden gebündelt in SQLite gespeichert; ein Reload verliert den sichtbaren Fortschritt nicht.
+- `/laeufe/<run-id>` ist direkt aufrufbar und pollt nur in der aktiven Detailansicht den
+  cursorbasierten Activity-Stream.
+- `/laeufe/<run-id>/dateien/<artifact-id>?attempt=N` ist der reload- und history-sichere
+  Vollseitenreader; Inhalte werden lazy geladen.
 - **Report-Design · Tageszeitung und Visual Report** ist eine echte Modellstufe. Ihre direkte HTML-Ausgabe läuft sichtbar durch dasselbe Live-Protokoll wie Triage, Rollenreviews und Synthese.
 - Thinking ist separat eingeklappt. Das Systemprotokoll enthält nur relevante Orchestrierungs-, Retry-, Kompaktierungs- und Abschlussmeldungen statt Pi-Lifecycle-Rauschen.
 - Im Menü **Läufe** können alle abgeschlossenen und fehlgeschlagenen Läufe gemeinsam archiviert werden. Das eigene Menü **Archiv** erlaubt Öffnen und Wiederherstellen. Nur fehlgeschlagene Läufe dürfen dauerhaft gelöscht werden.
 - Im Menü **Dokumente** stehen hochgeladene Originale, extrahierter Text, bisherige Läufe und **Erneut prüfen** bereit. Die Seite **Prüfen** enthält nur Upload, Auswahl und Laufkonfiguration.
 - Der Menüpunkt **Testmodus** nimmt ein Vergleichsdokument und bis zu drei Provider-/Modellkombinationen auf. Jede Modellliste hat direkt über dem Dropdown eine Suche nach Name oder ID. Nicht konfigurierte oder nicht erreichbare Kombinationen werden nicht gestartet. Die erzeugten Läufe bleiben vollständig aus **Läufe**, **Archiv** und der normalen Dokumentlaufhistorie heraus und sind unter stabilen `/tests/:id`-URLs vergleichbar.
 - Nach Abschluss der Report-Design-Stufe erscheint `report_static_check_completed` im Systemlog. Bei HTML-, CSS- oder JavaScript-Befunden folgt einmalig die sichtbare Stufe **Report-QA · statische Korrektur** und danach `report_static_recheck_completed`. Eine weiterhin ungültige zweite Fassung beendet den Lauf nachvollziehbar als Fehler.
-- Nach einem Prozessneustart werden noch gequeue-te Läufe erneut eingeplant. Bereits aktive, dadurch unterbrochene Stages werden mit erhaltener Teilausgabe nachvollziehbar als fehlgeschlagen markiert.
+- Nach einem Prozessneustart werden gequeue-te und unterbrochene Läufe über dieselbe zentrale Queue
+  im aktuellen Attempt wieder eingeplant.
 - Jede Darstellung hat mit `/results/<presentation-id>` eine stabile, kopierbare URL. Der SPA-Fallback stellt sicher, dass diese URL auch nach einem direkten Reload funktioniert.
 - Zeitungsressorts sind echte Unterseiten unter `/results/<presentation-id>/<ressort-slug>` und können einzeln kopiert oder neu geladen werden.
 - Pro neuem Lauf erzeugt der Report-Designer Tageszeitung und Visual Report gemeinsam. Das dokumentbezogene Motiv kommt bei Codex nativ von OpenAI, bei einem bildfähigen OpenRouter-Modell nativ von OpenRouter und bei der AI Box beziehungsweise als OpenRouter-Fallback von ComfyUI. Es wird in beiden Ausgaben wiederverwendet.

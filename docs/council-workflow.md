@@ -1,128 +1,84 @@
 # Council-Workflow
 
-## Kanonische Skill-Quellen
+## Verbindliche Quellen
 
-Die folgenden Dateien werden unverändert unter `resources/qa/source` verwaltet:
+Die acht Dateien unter `resources/qa/source` bleiben die hash-geprüften fachlichen Quellen. Die
+RACI-Matrix enthält 37 serverseitig validierte Aktivitätszeilen. Modelltext kann weder Rollen noch
+RACI-Verantwortung frei erfinden.
 
-1. `00_README.md`
-2. `01_QA-Architekt.md`
-3. `02_Test-Manager.md`
-4. `03_Test-Analyst.md`
-5. `04_Test-Automation-Engineer.md`
-6. `05_Tester.md`
-7. `06_QA-Council.md`
-8. `07_RACI-Team-Matrix.md`
+## Einheitlicher Ablauf
 
-Die Anwendung enthält für jede Datei den erwarteten SHA-256-Hash. `loadCanonicalSkills()` bricht ab, sobald eine Datei fehlt oder inhaltlich abweicht. Ein Test vergleicht zusätzlich die gelesenen Bytes mit der Datei und prüft alle 37 RACI-Zuordnungen einschließlich `4.1a`.
+Quick, Standard und Deep durchlaufen dieselben Phasen:
 
-Die Quellen werden nicht durch eine KI-Zusammenfassung ersetzt. Rollenaufrufe erhalten README, Council-Regeln, RACI-Matrix und die vollständige jeweilige Rollenquelle. Synthese und Debatte erhalten alle acht Quellen.
+1. Extraction
+2. Evidence
+3. Routing/RACI
+4. isolierte Rollenreviews
+5. anonyme Peer-Reviews und Ranking
+6. gemeinsames Review
+7. Pro/Contra-Debatte
+8. Council-Runden
+9. Synthese und Dissent-Audit
+10. Reports
 
-## Verarbeitung großer Dokumente
+Der Modus verändert ausschließlich die Zahl der abschließenden Council-Runden: Quick führt eine,
+Standard zwei und Deep drei Runden aus.
 
-Dokumente werden niemals über eine einfache Zeichenbegrenzung abgeschnitten.
+Jede eingeladene A-, R- oder benötigte C-Rolle erstellt genau ein isoliertes Review. Danach
+bewertet jede Rolle alle fremden, anonymisierten Reviews. `submit_peer_review` enthält nur die
+vollständige Rangfolge der erlaubten Review-IDs und einen ganzzahligen Consensus von 1 bis 5; die
+inhaltliche Kritik bleibt Markdown.
 
-- Jeder Chunk hat Position, Locator und SHA-256-Hash.
-- Bis zu einer praktikablen Kontextgröße wird der vollständige Chunk-Text direkt übergeben.
-- Bei großen Dokumenten wird jeder Chunk einzeln in eine Belegkarte überführt.
-- Erst nach Verarbeitung aller Chunks arbeiten Rollen auf den Belegkarten.
-- Das Coverage-Manifest enthält jeden Chunk und wird Teil des finalen Ergebnisses.
-- Originaldatei, extrahierter Text und Chunks bleiben in SQLite erhalten.
+- Eine Rolle: kein Peer-Ranking, Consensus 3,0 und niedrige Confidence.
+- Zwei Rollen: gegenseitige Bewertung; ein Ranggleichstand wird über die stabile anonyme ID
+  aufgelöst.
+- Ab drei Rollen: jede Rolle rangiert alle fremden Reviews.
 
-Eine fachliche Prüfung darf einzelne Inhalte als nicht relevant bewerten. Sie darf Inhalte jedoch nicht deshalb überspringen, weil das Dokument zu lang war.
+Alle A-, R- und C-Stimmen besitzen dasselbe Gewicht. Gesamtplatzierung und Consensus verwenden
+jeweils das arithmetische Mittel.
 
-## Ablauf
+## Strukturierte Steuerdaten
 
-```mermaid
-flowchart TD
-    A[Upload und Extraktion] --> B[Chunk-Coverage]
-    B --> C[Triage, Scope und RACI]
-    C --> Q{Zwingende Grundlage fehlt?}
-    Q -- Ja --> W[waiting_for_input]
-    W --> C
-    Q -- Nein --> R[Isolierte Rollenreviews]
-    R --> M{Council-Modus}
-    M -- Quick --> S[Synthese]
-    M -- Standard --> X[Cross-Reviews]
-    M -- Deep --> X
-    X --> D{Debatte erforderlich?}
-    D -- Nein --> S
-    D -- Ja --> E[Council-Debatte]
-    E --> S
-    S --> F[Kanonisches finales Markdown]
-    F --> P[Separate Präsentationsstufe]
-```
+RACI-Routing und Peer-Ranking werden ausschließlich über Pi-Custom-Tools übertragen:
 
-## Triage und Ground-or-Ask
+- `submit_council_plan`
+- `submit_peer_review`
 
-Die Triage bestimmt:
+Ein tool-only Turn ist auf Provider-Ebene gültig. Genau ein schema- und semantikgültiger Submit wird
+akzeptiert; beim Peer-Review bleibt zusätzlich die inhaltliche Markdown-Kritik verpflichtend.
+Fehlende, doppelte oder ungültige Aufrufe beziehungsweise eine fehlende Peer-Kritik erhalten
+höchstens zwei Reparaturversuche in jeweils neuen, stateless Pi-Sessions. Es gibt keinen JSON- oder
+Text-Fallback.
 
-- Dokumenttyp und Scope
-- Risikoprofil
-- anwendbare RACI-Rollen
-- empfohlenen Modus bei `Auto`
-- fehlende, für eine belastbare Prüfung zwingend benötigte Information
+Vor der Extraction muss das gewählte Modell Tool-Support in seinen Metadaten ausweisen und einen
+kleinen Submit-Probe bestehen. Das Ergebnis wird je Provider, Modell, Endpoint und
+Tool-Schema-Version 24 Stunden gespeichert.
 
-Bei einer notwendigen Rückfrage wechselt der Lauf auf `waiting_for_input`. Die Frage erscheint im Detailpanel. Nach einer Antwort wird sie zusammen mit dem bisherigen Fokus erneut in die Triage eingespeist.
+## Attempts und Checkpoints
 
-## Rollen
+Jeder Lauf beginnt mit Attempt 1. Manueller Restart erzeugt atomar einen neuen Attempt; Antworten
+auf Ground-or-Ask und Startup-Recovery bleiben im aktuellen Attempt. Stages, Events, Artefakte,
+Presentations, Bilder, Rückfragen und abgeleitete Analysen tragen eine `attempt_no`.
 
-- QA-Architekt
-- Test-Manager
-- Test-Analyst
-- Test-Automation-Engineer
-- Tester
+Jede der zehn Phasen schreibt erst nach Erfolg einen versionierten Checkpoint mit Input-Hash und
+Output-Referenzen. Dokument und Extraction-Cache sind attemptübergreifend; Analyse- und
+Reportausgaben bleiben attemptgebunden. Frühere Attempts werden nicht verändert und sind in der
+Laufansicht auswählbar.
 
-Jede Rolle arbeitet zunächst in einer eigenen Pi-Session. Sie sieht während des Einzelreviews keine
-Antworten der anderen Rollen. Jeder wesentliche Befund soll einen Locator enthalten; der
-KONFIDENZ-Block der jeweiligen Rollenvorlage ist Pflicht. Konsens wird nicht von den
-Einzelreviewern bewertet, sondern anschließend aus den unabhängigen Cross-Review-Pässen
-(`KONSENS-STAERKE: 1–5`, ungültig oder fehlend → 3) berechnet.
+## Finales Audit-Ergebnis
 
-## Modi
+Das kanonische Markdown besitzt getrennte Abschnitte:
 
-### Quick
+1. `## Finale Synthese`
+2. `## Triage und RACI`
+3. `## Isolierte Einzelreviews`
+4. `## Cross-Reviews`
+5. `## Gemeinsames Review`
+6. `## Debattenprotokoll`
+7. `## Council-Runden`
+8. `## Dissent-Audit`
+9. `## Abdeckungsmanifest`
 
-- mindestens zwei Rollen
-- keine Cross-Reviews
-- keine Debatte
-- direkte Synthese aus Triage und Einzelreviews
-
-### Standard
-
-- mindestens drei anwendbare Rollen
-- mindestens drei frische Cross-Review-Pässe; Rollenlabels werden zuvor zu `R1…Rn` anonymisiert
-- Debatte nur bei durchschnittlicher Konsens-Stärke ab 4,0
-- bei Debatte zwei sichtbare, sequenzielle Stufen: **Ankläger**, danach **Verteidiger** mit der
-  Ankläger-Antwort als Input
-- Chairman-Synthese plus eigener Dissens-Pass
-
-### Deep
-
-- alle fünf Rollen
-- fünf frische, anonymisierte Cross-Review-Pässe
-- getrennte Ankläger-/Verteidiger-Debatte wird immer durchgeführt
-- zwei voneinander unabhängige Chairman-Stufen für Konsens- und Minderheitsfassung
-- eigener Dual-Chairman-Dissens-Pass über beide Fassungen und das Rohmaterial
-
-## Finales Ergebnis
-
-Das kanonische finale Markdown enthält:
-
-1. Finale Synthese
-2. Triage, Scope und RACI
-3. alle isolierten Einzelreviews
-4. alle erzeugten Cross-Reviews
-5. Debattenprotokoll oder nachvollziehbare Begründung, warum keine Debatte stattfand
-6. vollständiges Chunk-Coverage-Manifest
-
-Jede Modellantwort wird zusätzlich als virtuelles Artefakt gespeichert. Dazu gehören Provider, Modell, Prompt-Hash und die Hashes der verwendeten Skill-Quellen.
-
-## Präsentationsstufe
-
-Die Report-Design-Stufe startet erst nach Speicherung des finalen Artefakts. Sie lädt den
-hash-geprüften `report-designer`-Skill und erzeugt Tageszeitung und Visual Report gemeinsam, direkt als
-HTML. Nach dem fertigen Package läuft einmalig die statische HTML/CSS/JS-Prüfung und bei Bedarf
-genau eine Agent-Korrekturstufe. `text` rendert separat das vollständige kanonische Markdown.
-
-Die Verdichtung darf keine neuen Befunde oder Zahlen erfinden. Das finale Artefakt bleibt
-unverändert und kann unabhängig von den Darstellungen heruntergeladen werden.
+Tageszeitung und Visual Report erhalten für diese Bereiche eigenständige Seiten. Die normale
+Resultatansicht zeigt nur die finale Synthese. Vollständige Einzelartefakte werden ausschließlich
+im Dateireader geöffnet.

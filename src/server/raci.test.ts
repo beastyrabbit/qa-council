@@ -92,4 +92,21 @@ describe("kanonischer RACI-Katalog", () => {
       }),
     );
   });
+
+  it("akzeptiert tester sowie Bindestrich- und Leerzeichenvarianten", () => {
+    const result = compileRaciAssignments([
+      {
+        id: "3.5",
+        evidence: ["Akzeptanzkriterien"],
+        triggerStatus: "satisfied",
+        consultants: ["tester"],
+        rationale: "Die praktische Ausführungssicht wird konsultativ benötigt.",
+      },
+    ]);
+
+    expect(result.errors).toEqual([]);
+    expect(result.assignments).toContainEqual(
+      expect.objectContaining({ role: "Tester", participation: "consulted" }),
+    );
+  });
 });

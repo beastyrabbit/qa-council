@@ -37,7 +37,7 @@ Anschließend ist die Oberfläche unter `http://qa-council.localhost:1355` errei
 
 - Codex: in der Einstellungsseite anmelden; das Pi-Auth-File liegt unter `/data/pi/auth.json`. Als manueller Fallback kann im Container `pi /login` verwendet werden.
 - OpenRouter: API-Key in der Einstellungsseite oder über `OPENROUTER_API_KEY`.
-- AI Box: Standardadresse `http://192.168.10.120:11434`; Modellliste über `/api/tags`, Inferenz über `/v1`.
+- AI Box: optional konfigurierbare Ollama-Adresse; Modellliste über `/api/tags`, Inferenz über `/v1`.
 - `TIKA_URL`: Standard `http://127.0.0.1:9998`.
 - `DATA_DIR`: Standard `./data`, im Container `/data`.
 
@@ -48,6 +48,12 @@ pnpm check
 ```
 
 Dies führt Biome, TypeScript, Vitest und den Produktionsbuild aus. Der Pre-Commit-Hook ergänzt Gitleaks.
+Die automatisierte Testsuite ist offline und startet keine Live-KI-Analyse; ein manueller
+Provider-Abnahmelauf erfordert immer eine ausdrückliche Benutzeranweisung für genau diesen Lauf.
+
+Das Projekt verwendet absichtlich zwei TypeScript-Pakete: das aktuelle `typescript` für App und
+Typecheck sowie den stabilen Alias `typescript-compiler` für die statische Prüfung generierter
+Report-Manifeste.
 
 ## Deployment
 

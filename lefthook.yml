@@ -2,7 +2,6 @@ pre-commit:
   parallel: true
   commands:
     biome:
-      glob: "*.{js,jsx,ts,tsx,json,jsonc,css}"
-      run: pnpm biome check {staged_files}
+      run: pnpm biome check .
     gitleaks:
       run: gitleaks git --staged --no-banner --redact

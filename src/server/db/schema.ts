@@ -1,4 +1,12 @@
-import { blob, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  blob,
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 export const documents = sqliteTable("documents", {
   id: text("id").primaryKey(),
@@ -43,7 +51,46 @@ export const runs = sqliteTable("runs", {
   completedAt: text("completed_at"),
   archivedAt: text("archived_at"),
   comparisonId: text("comparison_id"),
+  currentAttempt: integer("current_attempt").notNull().default(1),
 });
+
+export const runAttempts = sqliteTable(
+  "run_attempts",
+  {
+    runId: text("run_id").notNull(),
+    attemptNo: integer("attempt_no").notNull(),
+    status: text("status").notNull(),
+    startedAt: text("started_at").notNull(),
+    completedAt: text("completed_at"),
+    error: text("error"),
+    predecessorAttempt: integer("predecessor_attempt"),
+    resumePhase: text("resume_phase"),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.attemptNo] })],
+);
+
+export const runCheckpoints = sqliteTable(
+  "run_checkpoints",
+  {
+    runId: text("run_id").notNull(),
+    attemptNo: integer("attempt_no").notNull(),
+    phase: text("phase").notNull(),
+    checkpointVersion: integer("checkpoint_version").notNull(),
+    inputHash: text("input_hash").notNull(),
+    outputRefsJson: text("output_refs_json").notNull().default("[]"),
+    inheritedFromAttempt: integer("inherited_from_attempt"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.attemptNo, table.phase] }),
+    index("run_checkpoints_lookup_idx").on(
+      table.runId,
+      table.phase,
+      table.checkpointVersion,
+      table.inputHash,
+    ),
+  ],
+);
 
 export const comparisons = sqliteTable("comparisons", {
   id: text("id").primaryKey(),
@@ -57,6 +104,7 @@ export const comparisons = sqliteTable("comparisons", {
 export const runStages = sqliteTable("run_stages", {
   id: text("id").primaryKey(),
   runId: text("run_id").notNull(),
+  attemptNo: integer("attempt_no").notNull().default(1),
   name: text("name").notNull(),
   role: text("role"),
   status: text("status").notNull(),
@@ -73,6 +121,7 @@ export const runStages = sqliteTable("run_stages", {
 export const runQuestions = sqliteTable("run_questions", {
   id: text("id").primaryKey(),
   runId: text("run_id").notNull(),
+  attemptNo: integer("attempt_no").notNull().default(1),
   prompt: text("prompt").notNull(),
   answer: text("answer"),
   status: text("status").notNull(),
@@ -83,8 +132,10 @@ export const runQuestions = sqliteTable("run_questions", {
 export const artifacts = sqliteTable("artifacts", {
   id: text("id").primaryKey(),
   runId: text("run_id").notNull(),
+  attemptNo: integer("attempt_no").notNull().default(1),
   stageId: text("stage_id"),
   kind: text("kind").notNull(),
+  logicalKey: text("logical_key"),
   title: text("title").notNull(),
   contentType: text("content_type").notNull(),
   content: text("content").notNull(),
@@ -96,6 +147,7 @@ export const artifacts = sqliteTable("artifacts", {
 export const events = sqliteTable("events", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   runId: text("run_id").notNull(),
+  attemptNo: integer("attempt_no").notNull().default(1),
   stageId: text("stage_id"),
   type: text("type").notNull(),
   level: text("level").notNull(),
@@ -104,20 +156,28 @@ export const events = sqliteTable("events", {
   createdAt: text("created_at").notNull(),
 });
 
-export const presentations = sqliteTable("presentations", {
-  id: text("id").primaryKey(),
-  runId: text("run_id").notNull(),
-  kind: text("kind").notNull(),
-  title: text("title").notNull(),
-  html: text("html").notNull(),
-  sourceArtifactId: text("source_artifact_id").notNull(),
-  pagesJson: text("pages_json").notNull().default("[]"),
-  createdAt: text("created_at").notNull(),
-});
+export const presentations = sqliteTable(
+  "presentations",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id").notNull(),
+    attemptNo: integer("attempt_no").notNull().default(1),
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    html: text("html").notNull(),
+    sourceArtifactId: text("source_artifact_id").notNull(),
+    pagesJson: text("pages_json").notNull().default("[]"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("presentations_run_attempt_kind_idx").on(table.runId, table.attemptNo, table.kind),
+  ],
+);
 
 export const generatedImages = sqliteTable("generated_images", {
   id: text("id").primaryKey(),
   runId: text("run_id").notNull(),
+  attemptNo: integer("attempt_no").notNull().default(1),
   provider: text("provider").notNull(),
   prompt: text("prompt").notNull(),
   remotePromptId: text("remote_prompt_id"),
@@ -130,6 +190,7 @@ export const generatedImages = sqliteTable("generated_images", {
 export const derivedAnalyses = sqliteTable("derived_analyses", {
   id: text("id").primaryKey(),
   runId: text("run_id").notNull(),
+  attemptNo: integer("attempt_no").notNull().default(1),
   kind: text("kind").notNull(),
   status: text("status").notNull(),
   provider: text("provider").notNull(),
@@ -156,3 +217,21 @@ export const appSettings = sqliteTable("app_settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
+
+export const toolCapabilityProbes = sqliteTable(
+  "tool_capability_probes",
+  {
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    endpoint: text("endpoint").notNull(),
+    schemaVersion: integer("schema_version").notNull(),
+    supported: integer("supported").notNull(),
+    error: text("error"),
+    checkedAt: text("checked_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.provider, table.model, table.endpoint, table.schemaVersion],
+    }),
+  ],
+);
