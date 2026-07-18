@@ -205,6 +205,41 @@ describe("hybride Dokumentretrieval", () => {
     ).toEqual({ count: 3 });
   });
 
+  it("ersetzt einen Cacheeintrag aus einer älteren Retrieval-Version ohne Unique-Konflikt", async () => {
+    const chunks = seed();
+    await withDatabase(testDatabase(), () =>
+      buildRetrievalDossier({
+        documentId: "doc",
+        chunks,
+        embed: async (inputs) => inputs.map((input) => deterministicEmbedding(input)),
+      }),
+    );
+    const cached = testDatabase()
+      .prepare(
+        `SELECT id FROM embedding_cache_entries
+         WHERE document_id = 'doc' ORDER BY rowid LIMIT 1`,
+      )
+      .get() as { id: string };
+    testDatabase()
+      .prepare("UPDATE embedding_cache_entries SET id = 'legacy-vector-id' WHERE id = ?")
+      .run(cached.id);
+    const embed = vi.fn(async (inputs: string[]) =>
+      inputs.map((input) => deterministicEmbedding(input)),
+    );
+
+    const rebuilt = await withDatabase(testDatabase(), () =>
+      buildRetrievalDossier({ documentId: "doc", chunks, embed }),
+    );
+
+    expect(rebuilt.embedding.status).toBe("ready");
+    expect(embed).toHaveBeenCalledOnce();
+    expect(
+      testDatabase()
+        .prepare("SELECT COUNT(*) AS count FROM embedding_cache_entries WHERE id = ?")
+        .get("legacy-vector-id"),
+    ).toEqual({ count: 0 });
+  });
+
   it("baut ein einziges dokumentweites Rollenbriefing in Originalreihenfolge", async () => {
     const chunks = seed();
     const dossier = await withDatabase(testDatabase(), () =>

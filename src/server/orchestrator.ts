@@ -70,7 +70,7 @@ export const PHASE_VERSIONS: Record<PipelinePhase, number> = {
   evidence: 4,
   "routing-raci": 2,
   "role-reviews": 2,
-  "peer-reviews-ranking": 3,
+  "peer-reviews-ranking": 4,
   "joint-review": 1,
   "pro-contra-debate": 1,
   "council-rounds": 1,
@@ -464,6 +464,34 @@ function artifact(
       now(),
     );
   return id;
+}
+
+export function attachToolCallsToStage(
+  runId: string,
+  attemptNo: number,
+  stageId: string,
+  toolCalls: StageResult["toolCalls"],
+  rankingStageId: string,
+) {
+  const row = sqlite
+    .prepare(
+      `SELECT id, metadata FROM artifacts
+       WHERE run_id = ? AND attempt_no = ? AND kind = 'cross-review'
+         AND (
+           stage_id = ?
+           OR title = (SELECT name FROM run_stages WHERE id = ?)
+         )
+       ORDER BY CASE WHEN stage_id = ? THEN 0 ELSE 1 END, rowid DESC
+       LIMIT 1`,
+    )
+    .get(runId, attemptNo, stageId, stageId, stageId) as
+    | { id: string; metadata: string | null }
+    | undefined;
+  if (!row) throw new Error(`Das Cross-Review-Artefakt für Stage ${stageId} fehlt.`);
+  const metadata = safeParse<Record<string, unknown>>(row.metadata, {});
+  sqlite
+    .prepare("UPDATE artifacts SET stage_id = ?, metadata = ? WHERE id = ?")
+    .run(stageId, JSON.stringify({ ...metadata, toolCalls, rankingStageId }), row.id);
 }
 
 function systemPromptFor(role?: Role) {
@@ -1793,16 +1821,18 @@ ${context.text}`;
                   (candidate) => candidate.reviewId !== reviewer.reviewId,
                 );
                 const allowedIds = peers.map((peer) => peer.reviewId);
-                const submission = await runStructuredStage({
+                const critique = await runStage({
                   run,
                   name: `Cross-Review · ${reviewer.role}`,
                   role: reviewer.role,
-                  prompt: `Du bewertest als ${reviewer.role} in einer frischen Sitzung ausschließlich die anonymisierten Reviews der anderen Rollen. Kritisiere die Inhalte in Markdown: stärkster Beitrag, angreifbarste Schwäche, kollektiver blinder Fleck sowie Lane-/Owner-Probleme. Bewahre Widersprüche und Minderheitsbefunde.
+                  prompt: `Du bewertest als ${reviewer.role} in einer frischen Sitzung ausschließlich die anonymisierten Reviews der anderen Rollen.
 
-Rufe danach genau einmal submit_peer_review auf:
-- ranking ist eine vollständige Permutation aller erlaubten anonymen Review-IDs, bestes zuerst.
-- consensus ist eine ganze Zahl von 1 bis 5.
-- Schreibe weder Reviewer-Identität noch Kritik in den Tool-Aufruf.
+Liefere jetzt ausschließlich die inhaltliche Markdown-Kritik. Rufe in dieser Sitzung kein Submit-Tool auf. Behandle jede anonyme Review-ID einzeln und prüfe:
+- stärkster Beitrag;
+- angreifbarste Schwäche;
+- kollektiver blinder Fleck;
+- Lane-/Owner-Probleme;
+- erhaltenswerte Widersprüche und Minderheitsbefunde.
 
 PRÜFGEGENSTAND:
 ${context.manifest}
@@ -1815,13 +1845,32 @@ ${peers
                   progress: 60,
                   kind: "cross-review",
                   systemPrompt: systemPromptFor(reviewer.role),
+                  signal: groupSignal,
+                });
+                const submission = await runStructuredStage({
+                  run,
+                  name: `Cross-Ranking · ${reviewer.role}`,
+                  role: reviewer.role,
+                  prompt: `Du überträgst als ${reviewer.role} die bereits abgeschlossene Cross-Review-Kritik in strukturierte Steuerdaten. Analysiere das Dokument nicht neu und liefere keinen weiteren Markdown-Text.
+
+Rufe genau einmal submit_peer_review auf:
+- ranking ist eine vollständige Permutation aller erlaubten anonymen Review-IDs, bestes zuerst.
+- consensus ist eine ganze Zahl von 1 bis 5.
+- Schreibe weder Reviewer-Identität noch Kritik in den Tool-Aufruf. Nutze ausschließlich die folgende Kritik als Bewertungsgrundlage.
+
+ERLAUBTE REVIEW-IDS:
+${allowedIds.join(", ")}
+
+CROSS-REVIEW-KRITIK:
+${critique.content}`,
+                  progress: 60,
+                  kind: "cross-review-ranking",
+                  systemPrompt: systemPromptFor(reviewer.role),
                   submitName: "submit_peer_review",
                   submitDescription:
                     "Reicht ausschließlich die Rangfolge anonymer Peer-Reviews und den Consensus-Wert ein.",
                   parameters: peerReviewToolParameters,
                   schema: peerReviewSchema,
-                  contentValidate: (content) =>
-                    content.trim() ? [] : ["Die Markdown-Kritik des Cross-Reviews fehlt."],
                   semanticValidate: (value) => {
                     const unique = new Set(value.ranking);
                     return value.ranking.length === allowedIds.length &&
@@ -1836,10 +1885,17 @@ Erlaubte Rollenlabels: ${QA_ROLES.join(", ")}
 Erlaubte Evidence-Locators: ${[...allowedLocators].join("; ")}`,
                   signal: groupSignal,
                 });
+                attachToolCallsToStage(
+                  run.id,
+                  run.current_attempt,
+                  critique.id,
+                  submission.stage.toolCalls,
+                  submission.stage.id,
+                );
                 return {
                   reviewer: reviewer.role,
                   reviewerId: reviewer.reviewId,
-                  result: submission.stage,
+                  result: { ...critique, toolCalls: submission.stage.toolCalls },
                   submission: submission.value,
                 };
               }),

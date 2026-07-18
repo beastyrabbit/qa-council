@@ -69,6 +69,7 @@ export function ResultView({
     ? presentation?.pages?.find((page) => page.slug === pageSlug)
     : undefined;
   const renderedHtml = pageSlug ? newspaperPage?.html : presentation?.html;
+  const hasAuthoredReportStyles = renderedHtml?.includes("data-report-workspace") ?? false;
   useEffect(() => {
     if (section === "presentation" && presentation && presentation.id !== presentationId) {
       onPresentationChange(presentation.id);
@@ -206,7 +207,7 @@ export function ResultView({
       {section === "presentation" && renderedHtml && (
         <div
           id="result-presentation-panel"
-          className="rendered-result"
+          className={`rendered-result${hasAuthoredReportStyles ? " rendered-result--authored" : ""}`}
           role="tabpanel"
           aria-labelledby={`result-tab-${kind}`}
           data-presentation-id={presentation?.id}

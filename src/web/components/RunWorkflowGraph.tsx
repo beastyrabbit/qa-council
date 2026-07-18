@@ -80,7 +80,9 @@ export function workflowPhaseForStage(name: string): WorkflowPhaseId | null {
   if (name === "Dokumentweite Voranalyse" || name.startsWith("Belegkarte ")) return "evidence";
   if (name.startsWith("QA-Architekt · RACI-Routing")) return "routing";
   if (name.startsWith("Einzelreview · ")) return "role-reviews";
-  if (name.startsWith("Cross-Review · ")) return "peer-reviews";
+  if (name.startsWith("Cross-Review · ") || name.startsWith("Cross-Ranking · ")) {
+    return "peer-reviews";
+  }
   if (name === "Council · gemeinsames Review") return "joint-review";
   if (name.startsWith("Council-Debatte · ")) return "debate";
   if (name.startsWith("Council-Runde ")) return "council-rounds";

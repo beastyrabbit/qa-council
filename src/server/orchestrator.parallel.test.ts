@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildLargeDocumentRoleReviewWorkItems, settleParallel } from "./orchestrator.js";
+import { createDatabase, withDatabase } from "./db/index.js";
+import {
+  attachToolCallsToStage,
+  buildLargeDocumentRoleReviewWorkItems,
+  settleParallel,
+} from "./orchestrator.js";
 import type { CompiledRoleAssignment } from "./raci.js";
 import type { RetrievalDossier } from "./retrieval.js";
 
@@ -135,6 +140,61 @@ describe("dokumentweite Rollenreviews", () => {
       expect(item.prompt).toContain("Kapitel 1 · Zeilen 1–20");
       expect(item.prompt).toContain("Kapitel 20 · Zeilen 400–420");
       expect(item.prompt).not.toContain("Einzelreview · Test-Manager · Teil");
+    }
+  });
+});
+
+describe("getrennte Cross-Review-Ausgaben", () => {
+  it("verknüpft den tool-only Ranking-Submit mit der Markdown-Kritik", () => {
+    const database = createDatabase(":memory:");
+    try {
+      database.exec(`
+        INSERT INTO documents(
+          id, name, mime_type, size, sha256, original, status, created_at
+        ) VALUES ('doc', 'x.md', 'text/markdown', 1, 'hash', X'78', 'ready', 'now');
+        INSERT INTO runs(
+          id, document_id, provider, model, mode, presentation, status, created_at, current_attempt
+        ) VALUES ('run', 'doc', 'codex', 'model', 'quick', 'text', 'running', 'now', 1);
+        INSERT INTO run_attempts(run_id, attempt_no, status, started_at)
+        VALUES ('run', 1, 'running', 'now');
+        INSERT INTO run_stages(
+          id, run_id, attempt_no, name, role, status, output_text, started_at, completed_at
+        ) VALUES (
+          'critique', 'run', 1, 'Cross-Review · Tester', 'Tester', 'completed',
+          '## Kritik', 'now', 'now'
+        );
+        INSERT INTO artifacts(
+          id, run_id, attempt_no, stage_id, kind, logical_key, title,
+          content_type, content, sha256, metadata, created_at
+        ) VALUES (
+          'artifact', 'run', 1, 'critique', 'cross-review', 'cross-review:Tester',
+          'Cross-Review · Tester', 'text/markdown', '## Kritik', 'sha',
+          '{"promptHash":"prompt"}', 'now'
+        );
+      `);
+      const toolCalls = [
+        {
+          name: "submit_peer_review",
+          callId: "call-1",
+          args: { ranking: ["R-1"], consensus: 4 },
+        },
+      ];
+
+      withDatabase(database, () =>
+        attachToolCallsToStage("run", 1, "critique", toolCalls, "ranking-stage"),
+      );
+
+      const row = database
+        .prepare("SELECT content, metadata FROM artifacts WHERE id = 'artifact'")
+        .get() as { content: string; metadata: string };
+      expect(row.content).toBe("## Kritik");
+      expect(JSON.parse(row.metadata)).toMatchObject({
+        promptHash: "prompt",
+        toolCalls,
+        rankingStageId: "ranking-stage",
+      });
+    } finally {
+      database.close();
     }
   });
 });

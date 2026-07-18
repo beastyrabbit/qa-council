@@ -227,9 +227,11 @@ function shell(
         </header>
         ${newspaperNav(newspaperSections, activeSlug)}
         <div class="newspaper-context">${safeTitle}</div>`
-      : `<header class="result__masthead">
+      : kind === "text"
+        ? `<header class="result__masthead">
           <a href="#volltext">QA Council</a><span>${safeTitle}</span>
-        </header>`;
+        </header>`
+        : "";
   return `<main class="result result--${kind}">
     ${masthead}
     ${body}

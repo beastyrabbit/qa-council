@@ -47,6 +47,7 @@ import {
 import { createPresentationPdf } from "./pdf.js";
 import { markdownHtml } from "./presentation.js";
 import { codexAuthStatus, getAuthStorage, listModels } from "./providers.js";
+import { normalizeAuthoredReportHtml } from "./report-workspace.js";
 import { EMBEDDING_DIMENSIONS, embeddingConfig, listAiBoxEmbeddingModels } from "./retrieval.js";
 import { safeParse } from "./safe-json.js";
 import type { RunScheduler } from "./scheduler.js";
@@ -158,7 +159,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   app.get("/api/health", async () => ({
     ok: true,
-    version: "0.4.0",
+    version: "0.4.1",
     schemaVersion: SCHEMA_VERSION,
   }));
 
@@ -569,7 +570,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
                    THEN 'evidence'
                  WHEN s.name LIKE 'QA-Architekt · RACI-Routing%' THEN 'routing-raci'
                  WHEN s.name LIKE 'Einzelreview · %' THEN 'role-reviews'
-                 WHEN s.name LIKE 'Cross-Review · %' THEN 'peer-reviews-ranking'
+                 WHEN s.name LIKE 'Cross-Review · %' OR s.name LIKE 'Cross-Ranking · %'
+                   THEN 'peer-reviews-ranking'
                  WHEN s.name = 'Council · gemeinsames Review' THEN 'joint-review'
                  WHEN s.name LIKE 'Council-Debatte · %' THEN 'pro-contra-debate'
                  WHEN s.name LIKE 'Council-Runde %' THEN 'council-rounds'
@@ -631,7 +633,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
                    THEN 'evidence'
                  WHEN s.name LIKE 'QA-Architekt · RACI-Routing%' THEN 'routing-raci'
                  WHEN s.name LIKE 'Einzelreview · %' THEN 'role-reviews'
-                 WHEN s.name LIKE 'Cross-Review · %' THEN 'peer-reviews-ranking'
+                 WHEN s.name LIKE 'Cross-Review · %' OR s.name LIKE 'Cross-Ranking · %'
+                   THEN 'peer-reviews-ranking'
                  WHEN s.name = 'Council · gemeinsames Review' THEN 'joint-review'
                  WHEN s.name LIKE 'Council-Debatte · %' THEN 'pro-contra-debate'
                  WHEN s.name LIKE 'Council-Runde %' THEN 'council-rounds'
@@ -781,7 +784,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
                    THEN 'evidence'
                  WHEN s.name LIKE 'QA-Architekt · RACI-Routing%' THEN 'routing-raci'
                  WHEN s.name LIKE 'Einzelreview · %' THEN 'role-reviews'
-                 WHEN s.name LIKE 'Cross-Review · %' THEN 'peer-reviews-ranking'
+                 WHEN s.name LIKE 'Cross-Review · %' OR s.name LIKE 'Cross-Ranking · %'
+                   THEN 'peer-reviews-ranking'
                  WHEN s.name = 'Council · gemeinsames Review' THEN 'joint-review'
                  WHEN s.name LIKE 'Council-Debatte · %' THEN 'pro-contra-debate'
                  WHEN s.name LIKE 'Council-Runde %' THEN 'council-rounds'
@@ -1124,10 +1128,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           originAttempt: row.attempt_no,
           kind: row.kind,
           title: row.title,
-          html: hydratePresentationImages(row.html),
+          html: normalizeAuthoredReportHtml(hydratePresentationImages(row.html)),
           pages: safeParse<PresentationRecord["pages"]>(row.pages_json, [])?.map((page) => ({
             ...page,
-            html: hydratePresentationImages(page.html),
+            html: normalizeAuthoredReportHtml(hydratePresentationImages(page.html)),
           })),
           createdAt: row.created_at,
         }
@@ -1144,7 +1148,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       return reply.code(409).send({ error: "PDF-Export ist für den Visual Report verfügbar." });
     }
     try {
-      const pdf = await createPresentationPdf(hydratePresentationImages(row.html), row.title);
+      const pdf = await createPresentationPdf(
+        normalizeAuthoredReportHtml(hydratePresentationImages(row.html)),
+        row.title,
+      );
       return reply
         .header("Content-Type", "application/pdf")
         .header("Content-Disposition", `attachment; filename="qa-visual-report-${id}.pdf"`)

@@ -1,6 +1,6 @@
 # Deployment
 
-> Release 0.4.0 benötigt vor dem Rollout einen verifizierten Longhorn-VolumeSnapshot. Die
+> Release 0.4.1 benötigt vor dem Rollout einen verifizierten Longhorn-VolumeSnapshot. Die
 > Recreate-Strategie muss verhindern, dass zwei Pods gleichzeitig die SQLite-Migration ausführen.
 > Bei Migrationsproblemen: Deployment stoppen, PVC aus dem Snapshot wiederherstellen und erst
 > danach das 0.2.1-Image setzen. Ein reiner Image-Rollback ist nicht ausreichend.
@@ -115,8 +115,8 @@ lefthook run pre-commit
 
 1. Anwendungsrepository nach Forgejo pushen.
 2. Erfolgreichen Quality- und Container-Job abwarten.
-3. Den Git-Tag und Forgejo-Release `v0.4.0` erstellen und prüfen, dass
-   `git.heerlab.com/beasty/qa-council:0.4.0` verfügbar ist.
+3. Den Git-Tag und Forgejo-Release `v0.4.1` erstellen und prüfen, dass
+   `git.heerlab.com/beasty/qa-council:0.4.1` verfügbar ist.
 4. Den unveränderlichen SemVer-Tag im HelmRelease eintragen und den GitOps-Commit pushen.
 5. Flux synchronisieren:
 

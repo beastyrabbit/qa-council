@@ -1931,9 +1931,30 @@ export function scopeReportCss(source: string, rootSelector: string) {
   if (!/^\.[-_a-zA-Z][-_a-zA-Z0-9]*$/.test(rootSelector)) {
     throw new Error("Ungültiger CSS-Scope für den Report.");
   }
+  const scopedSource = source.replaceAll(":root", ":scope").replaceAll(rootSelector, ":scope");
   return `@scope (${rootSelector}) {
-${source.replaceAll(":root", ":scope")}
+${scopedSource}
 }`;
+}
+
+export function normalizeAuthoredReportHtml(source: string) {
+  if (!source.includes("data-report-workspace")) return source;
+  const normalizedCss = source.replace(
+    /(<style\b[^>]*\bdata-report-workspace\b[^>]*>)([\s\S]*?)(<\/style>)/i,
+    (full, opening: string, css: string, closing: string) => {
+      const declaration = css.match(/^\s*@scope\s*\((\.[-_a-zA-Z][-_a-zA-Z0-9]*)\)\s*\{/);
+      if (!declaration) return full;
+      const rootSelector = declaration[1];
+      const bodyStart = declaration[0].length;
+      return `${opening}${css.slice(0, bodyStart)}${css
+        .slice(bodyStart)
+        .replaceAll(rootSelector, ":scope")}${closing}`;
+    },
+  );
+  return normalizedCss.replace(
+    /(<main class="result result--onepaper">\s*)<header class="result__masthead">[\s\S]*?<\/header>/i,
+    "$1",
+  );
 }
 
 function transportContent(source: string, tag: string) {

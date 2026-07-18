@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { validateReportPackage } from "./report-validation.js";
 import {
   assembleReportWorkspace,
+  normalizeAuthoredReportHtml,
   parseReportManifest,
   readReportWorkspace,
   reportWorkspacePath,
   scaffoldReportWorkspace,
+  scopeReportCss,
   validateReportCss,
   validateReportWorkspace,
 } from "./report-workspace.js";
@@ -29,6 +31,33 @@ afterEach(async () => {
 });
 
 describe("persistenter Report-Arbeitsbereich", () => {
+  it("ersetzt Root-Selektoren innerhalb des CSS-Scopes durch :scope", () => {
+    const scoped = scopeReportCss(
+      `:root { --ink: #123; }
+.result--newspaper { color: var(--ink); }
+.result--newspaper h1 { font-size: 3rem; }
+.news-card { padding: 1rem; }`,
+      ".result--newspaper",
+    );
+
+    expect(scoped).toContain("@scope (.result--newspaper)");
+    expect(scoped).toContain(":scope { --ink: #123; }");
+    expect(scoped).toContain(":scope h1 { font-size: 3rem; }");
+    expect(scoped).not.toContain(".result--newspaper { color");
+  });
+
+  it("repariert bereits gespeicherte Report-Styles beim Lesen", () => {
+    const html =
+      '<style data-report-workspace>@scope (.result--onepaper) { .result--onepaper { color: red; } .result--onepaper h1 { color: blue; } }</style><main class="result result--onepaper"><header class="result__masthead"><a>QA Council</a></header><section class="onepaper-sheet"></section></main>';
+    const normalized = normalizeAuthoredReportHtml(html);
+
+    expect(normalized).toContain(
+      "@scope (.result--onepaper) { :scope { color: red; } :scope h1 { color: blue; } }",
+    );
+    expect(normalized).toContain('<main class="result result--onepaper">');
+    expect(normalized).not.toContain('class="result__masthead"');
+  });
+
   it("legt beide gestalteten Report-Templates als HTML, CSS und TS unter DATA_DIR an", async () => {
     const files = await scaffoldReportWorkspace({
       runId: "run-42",

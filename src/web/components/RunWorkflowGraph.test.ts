@@ -8,6 +8,7 @@ describe("Ablaufgrafik", () => {
     ["QA-Architekt · RACI-Routing", "routing"],
     ["Einzelreview · Tester", "role-reviews"],
     ["Cross-Review · Tester", "peer-reviews"],
+    ["Cross-Ranking · Tester", "peer-reviews"],
     ["Council · gemeinsames Review", "joint-review"],
     ["Council-Debatte · Ankläger", "debate"],
     ["Council-Runde 1 · Tester", "council-rounds"],

@@ -56,7 +56,11 @@ mit exakten Begriffen und strukturellen Beziehungen weiter.
 Jede eingeladene A-, R- oder benötigte C-Rolle erstellt genau ein isoliertes Review. Danach
 bewertet jede Rolle alle fremden, anonymisierten Reviews. `submit_peer_review` enthält nur die
 vollständige Rangfolge der erlaubten Review-IDs und einen ganzzahligen Consensus von 1 bis 5; die
-inhaltliche Kritik bleibt Markdown.
+inhaltliche Kritik bleibt Markdown. Dafür laufen pro Rolle bewusst zwei getrennte, stateless
+Stufen: `Cross-Review` schreibt zuerst ausschließlich die fachliche Markdown-Kritik.
+`Cross-Ranking` überträgt anschließend genau diese fertige Kritik in einen tool-only
+`submit_peer_review`-Aufruf. So muss kein Modell gleichzeitig Fließtext und strukturierte
+Steuerdaten in einer Antwort liefern.
 
 - Eine Rolle: kein Peer-Ranking, Consensus 3,0 und niedrige Confidence.
 - Zwei Rollen: gegenseitige Bewertung; ein Ranggleichstand wird über die stabile anonyme ID
@@ -74,10 +78,10 @@ RACI-Routing und Peer-Ranking werden ausschließlich über Pi-Custom-Tools über
 - `submit_peer_review`
 
 Ein tool-only Turn ist auf Provider-Ebene gültig. Genau ein schema- und semantikgültiger Submit wird
-akzeptiert; beim Peer-Review bleibt zusätzlich die inhaltliche Markdown-Kritik verpflichtend.
-Fehlende, doppelte oder ungültige Aufrufe beziehungsweise eine fehlende Peer-Kritik erhalten
-höchstens zwei Reparaturversuche in jeweils neuen, stateless Pi-Sessions. Es gibt keinen JSON- oder
-Text-Fallback.
+akzeptiert. Beim Peer-Review entsteht die verpflichtende Markdown-Kritik bereits in der
+vorhergehenden `Cross-Review`-Stufe; nur das anschließende `Cross-Ranking` ist tool-only. Fehlende,
+doppelte oder ungültige Aufrufe erhalten höchstens zwei Reparaturversuche in jeweils neuen,
+stateless Pi-Sessions. Es gibt keinen JSON- oder Text-Fallback.
 
 Vor der Extraction muss das gewählte Modell Tool-Support in seinen Metadaten ausweisen und einen
 kleinen Submit-Probe bestehen. Das Ergebnis wird je Provider, Modell, Endpoint und

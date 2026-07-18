@@ -65,7 +65,9 @@ docs/                      Projektdokumentation
 8. Eine lokale Voranalyse verbindet exakte Begriffe, strukturell benachbarte Chunks und semantisch
    ähnliche Passagen. Dafür werden standardmäßig `qwen3-embedding:8b` auf der AI Box und ein
    dokumenthashbasierter `sqlite-vec`-Cache verwendet. Ist das Embedding-Modell nicht erreichbar,
-   bleibt die exakte und strukturelle Analyse verfügbar.
+   bleibt die exakte und strukturelle Analyse verfügbar. Ändert sich die Retrieval-Schemaversion,
+   ersetzt der neue Vektor den Cacheeintrag derselben Quelle atomar, statt mit dessen
+   Eindeutigkeitsregel zu kollidieren.
 9. Die Voranalyse erzeugt ausschließlich Such- und Navigationshinweise: mögliche RACI-Aktivitäten,
    betroffene Rollen, kompakte extraktive Chunk-Zusammenfassungen aus mehreren unveränderten
    Originalauszügen und dokumentweite Chunk-Beziehungen. Sie ist weder Fachreview noch Quelle.
@@ -77,15 +79,19 @@ docs/                      Projektdokumentation
 11. Jede Fachrolle erzeugt genau ein isoliertes Review des vollständigen Dokuments; es gibt keine
     Modellstufe pro Rolle und Chunk und keinen nachgelagerten Merge von Teilreviews. Eine
     chunkübergreifende Aussage muss alle beteiligten Locator nennen.
-12. Ein Lauf referenziert Dokument, Provider, Modell, Council-Modus, Fokus und gewünschte erste Darstellung.
-13. Der Orchestrator erzeugt Stufen, Events und virtuelle Artefakte.
-14. Nach der Synthese wird das kanonische finale Markdown gespeichert.
-15. Eine eigene, live sichtbare Pi-Stufe lädt den Report-Designer-Skill und erzeugt aus dem fachlich abgeschlossenen Ergebnis direkt ein HTML-Package mit mehrseitiger Tageszeitung, diagrammreichem Visual Report und Bildbriefing. Sie verwendet keinen Markdown-zu-HTML-Konverter.
-16. Nach der fertigen Report-Antwort prüft der Server einmalig Transportstruktur, HTML-Verschachtelung, erforderliche Seiten und Hooks, das bekannte CSS-Klassenvokabular sowie verbotene JavaScript-Elemente und Attribute. Bei Befunden erhält derselbe Report-Agent den vollständigen Fehlerbericht und genau eine Korrekturrunde; anschließend folgt eine statische Nachprüfung.
-17. Bei Codex und visionfähigen OpenRouter-Modellen rendert Chromium beide HTML-Ausgaben einmal als Screenshot. Eine sichtbare Vision-Stufe darf Hierarchie und Layout daraufhin einmal verbessern; eine weitere statische Vertragsprüfung entscheidet, ob die Revision übernommen wird. Lokale Modelle überspringen diesen Schritt.
-18. Beide Designausgaben werden für jeden Lauf gespeichert. Die Textdarstellung rendert separat das kanonische Markdown.
-19. Jeder neue Lauf kann ein dokumentbezogenes Editorialmotiv erzeugen: Codex über die native OpenAI-Bild-API, OpenRouter nativ bei bildfähigem Modell und sonst optional über ComfyUI, die AI Box optional über ComfyUI. Tageszeitung, Visual Report und PDF desselben Laufs verwenden gemeinsam dieses eine Motiv.
-20. Ein Vergleich legt einen eigenen `comparisons`-Datensatz an und startet je erreichbarer Provider-/Modellwahl einen normalen, aber mit `comparison_id` isolierten Council-Lauf. `/api/runs` liefert diese Läufe bewusst nicht aus; sie werden ausschließlich über die Vergleichs-API und den Testmodus angezeigt.
+12. Jede Rolle erzeugt danach eine Markdown-Kritik der anonymisierten fremden Reviews. Eine
+    separate kurze `Cross-Ranking`-Stufe überträgt diese fertige Kritik ausschließlich als
+    `submit_peer_review`-Tool-Call mit Rangfolge und Consensus. Beide Stufen erscheinen gemeinsam
+    in der Peer-Review-Phase der Ablaufgrafik.
+13. Ein Lauf referenziert Dokument, Provider, Modell, Council-Modus, Fokus und gewünschte erste Darstellung.
+14. Der Orchestrator erzeugt Stufen, Events und virtuelle Artefakte.
+15. Nach der Synthese wird das kanonische finale Markdown gespeichert.
+16. Eine eigene, live sichtbare Pi-Stufe lädt den Report-Designer-Skill und erzeugt aus dem fachlich abgeschlossenen Ergebnis direkt ein HTML-Package mit mehrseitiger Tageszeitung, diagrammreichem Visual Report und Bildbriefing. Sie verwendet keinen Markdown-zu-HTML-Konverter.
+17. Nach der fertigen Report-Antwort prüft der Server einmalig Transportstruktur, HTML-Verschachtelung, erforderliche Seiten und Hooks, das bekannte CSS-Klassenvokabular sowie verbotene JavaScript-Elemente und Attribute. Bei Befunden erhält derselbe Report-Agent den vollständigen Fehlerbericht und genau eine Korrekturrunde; anschließend folgt eine statische Nachprüfung.
+18. Bei Codex und visionfähigen OpenRouter-Modellen rendert Chromium beide HTML-Ausgaben einmal als Screenshot. Eine sichtbare Vision-Stufe darf Hierarchie und Layout daraufhin einmal verbessern; eine weitere statische Vertragsprüfung entscheidet, ob die Revision übernommen wird. Lokale Modelle überspringen diesen Schritt.
+19. Beide Designausgaben werden für jeden Lauf gespeichert. Die Textdarstellung rendert separat das kanonische Markdown.
+20. Jeder neue Lauf kann ein dokumentbezogenes Editorialmotiv erzeugen: Codex über die native OpenAI-Bild-API, OpenRouter nativ bei bildfähigem Modell und sonst optional über ComfyUI, die AI Box optional über ComfyUI. Tageszeitung, Visual Report und PDF desselben Laufs verwenden gemeinsam dieses eine Motiv.
+21. Ein Vergleich legt einen eigenen `comparisons`-Datensatz an und startet je erreichbarer Provider-/Modellwahl einen normalen, aber mit `comparison_id` isolierten Council-Lauf. `/api/runs` liefert diese Läufe bewusst nicht aus; sie werden ausschließlich über die Vergleichs-API und den Testmodus angezeigt.
 
 ## Datenbank
 

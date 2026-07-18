@@ -404,9 +404,19 @@ async function ensureEmbeddings(
           id, source_kind, document_id, source_id, source_sha256, model, dimensions, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       );
+      const deleteSourceCache = sqlite.prepare(
+        `DELETE FROM embedding_cache_entries
+         WHERE source_kind = ? AND source_id = ? AND source_sha256 = ? AND model = ?`,
+      );
       for (const [batchIndex, entry] of batch.entries()) {
         const vector = vectors[batchIndex];
         if (!vector) throw new Error("Ein erwartetes Embedding fehlt.");
+        deleteSourceCache.run(
+          entry.source.kind,
+          entry.source.sourceId,
+          entry.source.sourceHash,
+          config.model,
+        );
         sqlite.prepare("DELETE FROM embedding_vectors WHERE id = ?").run(entry.vectorId);
         sqlite.prepare("DELETE FROM embedding_cache_entries WHERE id = ?").run(entry.vectorId);
         insertVector.run(
