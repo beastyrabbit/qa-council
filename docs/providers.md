@@ -50,9 +50,21 @@ Verwendete Schnittstellen:
 
 - `GET /api/tags` für die Modellliste
 - `POST /api/show` für Fähigkeiten, maximales Kontextfenster und ein im Modelfile gesetztes `num_ctx`
+- `POST /api/embed` für die lokale Dokument-Retrieval-Voranalyse
 - `/v1` als OpenAI-kompatible Inferenzbasis
 
 Das Standardmodell bei einer neuen Datenbank ist `qwen3-coder-next:q4km`. Die Einstellungsseite zeigt nur Modelle mit der Ollama-Fähigkeit `completion`; reine Embedding-Modelle sind für Council-Läufe nicht auswählbar. Deshalb kann die Zahl in der Council-Auswahl kleiner sein als die Zahl aus `ollama list`. Neben jedem Modell steht das verwendbare Kontextfenster. Ein `PARAMETER num_ctx` im Modelfile oder der aktuelle `context_length` aus `/api/ps` begrenzt den effektiven Wert; die Auswahl stellt ihn dem theoretischen Modellmaximum gegenüber.
+
+Die lokale Voranalyse großer Dokumente besitzt eine getrennte Modellauswahl. Dort erscheinen nur
+Modelle, deren `/api/show`-Metadaten die Capability `embedding` und die kompatible Größe von 4.096
+Dimensionen enthalten. Standard ist `qwen3-embedding:8b`. Dokumentchunks, kleinere Passagen und
+die kanonischen RACI-Zeilen werden anhand ihrer Inhalts- und Schema-Hashes nur einmal eingebettet; der
+`sqlite-vec`-Index wird danach dokumentübergreifend wiederverwendet. Der Index ist ableitbar und
+ersetzt weder Originaltext noch persistente Review-Artefakte.
+
+Schlägt die lokale Embedding-Inferenz fehl, wird kein externer Provider als Ersatz aufgerufen.
+Der Council-Lauf arbeitet mit der exakten und strukturellen Retrieval-Analyse weiter und schreibt
+eine Warnung ins Laufprotokoll.
 
 Die OpenAI-kompatible Ollama-API kann `num_ctx` nicht pro Request ändern. Ein größeres Kontextfenster muss daher auf der AI Box über `OLLAMA_CONTEXT_LENGTH` oder einen eigenen Modellalias mit `PARAMETER num_ctx` konfiguriert werden. `GET /api/ps` zeigt das tatsächlich geladene Kontextfenster.
 

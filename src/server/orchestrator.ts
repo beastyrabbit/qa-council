@@ -32,6 +32,12 @@ import {
   scopeReportCss,
   validateReportWorkspace,
 } from "./report-workspace.js";
+import {
+  buildRetrievalDossier,
+  embeddingConfigFingerprint,
+  type RetrievalDossier,
+  roleChunkNavigation,
+} from "./retrieval.js";
 import { safeParse } from "./safe-json.js";
 import { RunScheduler, type SchedulerLimits } from "./scheduler.js";
 import {
@@ -60,7 +66,7 @@ export const PIPELINE_PHASES = [
 export type PipelinePhase = (typeof PIPELINE_PHASES)[number];
 export const PHASE_VERSIONS: Record<PipelinePhase, number> = {
   extraction: 2,
-  evidence: 2,
+  evidence: 3,
   "routing-raci": 2,
   "role-reviews": 1,
   "peer-reviews-ranking": 3,
@@ -307,6 +313,10 @@ function checkpointInputHash(
           ? { [REPORT_DESIGN_SKILL_FILE]: sha256(loadReportDesignSkill()) }
           : {}),
       },
+      retrieval:
+        phaseIndex >= PIPELINE_PHASES.indexOf("evidence")
+          ? embeddingConfigFingerprint()
+          : undefined,
     }),
   );
 }
@@ -1106,9 +1116,10 @@ async function ensureDocumentExtraction(run: RunRow, signal: AbortSignal) {
 function documentContext(run: RunRow) {
   const chunks = sqlite
     .prepare(
-      "SELECT position, locator, content, sha256 FROM document_chunks WHERE document_id = ? ORDER BY position",
+      "SELECT id, position, locator, content, sha256 FROM document_chunks WHERE document_id = ? ORDER BY position",
     )
     .all(run.document_id) as Array<{
+    id: string;
     position: number;
     locator: string;
     content: string;
@@ -1263,42 +1274,100 @@ function anonymizeReview(content: string) {
 }
 
 async function buildEvidence(run: RunRow, context: ReturnType<typeof documentContext>) {
-  if (context.text.length <= 110_000) return context.text;
+  if (context.text.length <= 110_000) {
+    return {
+      content: context.text,
+      artifactIds: [] as string[],
+      dossier: undefined as RetrievalDossier | undefined,
+    };
+  }
   event(
     run.id,
-    "map_reduce_started",
-    "Großes Dokument: jeder Chunk wird einzeln belegt ausgewertet",
+    "retrieval_analysis_started",
+    "Großes Dokument: hybride, quelltreue Voranalyse wird aufgebaut",
     {
       chunks: context.chunks.length,
     },
   );
-  const evidence = await mapParallelBounded(
-    context.chunks,
-    run.provider === "aibox" ? 2 : 5,
-    async (chunk) => {
-      const mapped = await runStage({
-        run,
-        name: `Belegkarte ${chunk.position + 1}/${context.chunks.length}`,
-        prompt: `Extrahiere aus diesem vollständigen Chunk alle QA-relevanten Fakten, Anforderungen, Risiken, Unklarheiten und wörtlich kurze Belegstellen. Nichts QA-Relevantes auslassen. Locator und Hash müssen erhalten bleiben.\n\nLOCATOR: ${chunk.locator}\nHASH: ${chunk.sha256}\n\n${chunk.content}`,
-        progress: 5 + Math.round((chunk.position / context.chunks.length) * 10),
-        kind: "evidence-map",
-        systemPrompt: systemPromptFor("QA-Architekt"),
-      });
-      return `## ${chunk.locator}\nHash: ${chunk.sha256}\n${mapped.content}`;
-    },
-  );
-  artifact(
+  const stageId = nanoid();
+  const stageName = "Dokumentweite Voranalyse";
+  const startedAt = now();
+  sqlite
+    .prepare(
+      `INSERT INTO run_stages(
+        id, run_id, attempt_no, name, status, prompt_hash, started_at
+      ) VALUES (?, ?, ?, ?, 'running', ?, ?)`,
+    )
+    .run(stageId, run.id, run.current_attempt, stageName, embeddingConfigFingerprint(), startedAt);
+  sqlite
+    .prepare("UPDATE runs SET current_stage = ?, progress = MAX(progress, 12) WHERE id = ?")
+    .run(stageName, run.id);
+  event(
     run.id,
-    null,
-    "coverage-manifest",
-    "Vollständiges Chunk-Coverage-Manifest",
-    context.manifest,
-    {
-      total: context.chunks.length,
-      processed: context.chunks.length,
-    },
+    "stage_started",
+    stageName,
+    { chunks: context.chunks.length, strategy: "hybrid-retrieval" },
+    "info",
+    stageId,
   );
-  return evidence.join("\n\n");
+  try {
+    const signal = activeRunControllers.get(run.id)?.signal;
+    const dossier = await runScheduler().withInferenceSlot("aibox", signal, () =>
+      buildRetrievalDossier({
+        documentId: run.document_id,
+        chunks: context.chunks,
+        signal,
+      }),
+    );
+    const summary = `${context.chunks.length} Originalchunks indexiert · Retrieval ${dossier.embedding.status} · ${dossier.relationshipManifest.split("\n").filter((line) => line.startsWith("- ")).length} dokumentweite Beziehungen`;
+    sqlite
+      .prepare(
+        `UPDATE run_stages
+         SET status = 'completed', output_text = ?, completed_at = ?
+         WHERE id = ?`,
+      )
+      .run(summary, now(), stageId);
+    const artifactIds = dossier.cards.map((card) =>
+      artifact(run.id, stageId, "evidence-map", card.title, card.content, {
+        strategy: "hybrid-retrieval",
+        retrievalVersion: dossier.version,
+        embedding: dossier.embedding,
+        locator: card.hint.locator,
+        chunkId: card.hint.chunkId,
+        activities: card.hint.activities,
+        neighbors: card.hint.neighbors,
+      }),
+    );
+    event(
+      run.id,
+      "stage_completed",
+      `${stageName} abgeschlossen`,
+      {
+        chunks: context.chunks.length,
+        embedding: dossier.embedding,
+        artifacts: artifactIds.length,
+      },
+      "info",
+      stageId,
+    );
+    if (dossier.embedding.status === "unavailable") {
+      event(
+        run.id,
+        "embedding_fallback",
+        "Lokale Embeddings nicht verfügbar; exakte und strukturelle Voranalyse wird verwendet",
+        { reason: dossier.embedding.error, model: dossier.embedding.model },
+        "warning",
+        stageId,
+      );
+    }
+    return { content: dossier.markdown, artifactIds, dossier };
+  } catch (error) {
+    const cancelled = activeRunControllers.get(run.id)?.signal.aborted === true;
+    sqlite
+      .prepare("UPDATE run_stages SET status = ?, completed_at = ? WHERE id = ?")
+      .run(cancelled ? "cancelled" : "failed", now(), stageId);
+    throw error;
+  }
 }
 
 export async function executeRun(runId: string) {
@@ -1399,6 +1468,7 @@ export async function executeRun(runId: string) {
     reusableCheckpoints = validCheckpoints(run);
     const evidenceCheckpoint = reusableCheckpoints.get("evidence");
     let evidence: string;
+    let retrievalDossier: RetrievalDossier | undefined;
     if (evidenceCheckpoint) {
       const originAttempt = evidenceCheckpoint.inherited_from_attempt ?? run.current_attempt;
       if (context.text.length <= 110_000) {
@@ -1408,7 +1478,7 @@ export async function executeRun(runId: string) {
           .prepare(
             `SELECT content FROM artifacts
              WHERE run_id = ? AND attempt_no = ? AND kind = 'evidence-map'
-             ORDER BY created_at, rowid`,
+             ORDER BY rowid`,
           )
           .all(runId, originAttempt) as Array<{ content: string }>;
         if (!evidenceRows.length) {
@@ -1417,6 +1487,13 @@ export async function executeRun(runId: string) {
           );
         }
         evidence = evidenceRows.map((row) => row.content).join("\n\n");
+        retrievalDossier = await runScheduler().withInferenceSlot("aibox", controller.signal, () =>
+          buildRetrievalDossier({
+            documentId: run.document_id,
+            chunks: context.chunks,
+            signal: controller.signal,
+          }),
+        );
       }
       event(runId, "checkpoint_reused", "Checkpoint wiederverwendet: evidence", {
         phase: "evidence",
@@ -1434,8 +1511,10 @@ export async function executeRun(runId: string) {
           sourceSha256: sha256(Buffer.from(run.extracted_text)),
         },
       );
-      evidence = await buildEvidence(run, context);
-      completeCheckpoint(run, "evidence", [coverageArtifactId]);
+      const builtEvidence = await buildEvidence(run, context);
+      evidence = builtEvidence.content;
+      retrievalDossier = builtEvidence.dossier;
+      completeCheckpoint(run, "evidence", [coverageArtifactId, ...builtEvidence.artifactIds]);
     }
     const focus = run.focus ? `\nBesonderer Fokus des Nutzers: ${run.focus}` : "";
     const allowedLocators = new Set(context.chunks.map((chunk) => chunk.locator));
@@ -1475,6 +1554,7 @@ Regeln:
 - "triggerStatus" bewertet den Handoff-Trigger. Bei "missing" oder "unclear" enthält "missingInputs" mindestens einen konkreten fehlenden Input.
 - "consultants" darf nur konkret benötigte C-Rollen der jeweiligen Matrixzeile enthalten. Nenne niemals A, R oder I.
 - "question" ist nur bei einer zwingend fehlenden Information ein vollständiger Fragesatz mit Fragezeichen, sonst null.
+- RACI-Navigationsscores und Chunk-Beziehungen sind unverbindliche Kandidaten. Prüfe sie anhand der mitgelieferten Originalauszüge, decke das gesamte Coverage-Manifest ab und korrigiere unpassende Vorschläge.
 
 Danach folgt eine kurze, menschlich lesbare Scope- und Auswahlbegründung.${focus}\n\nDOKUMENT/BELEGKARTEN:\n${evidence}`,
         progress: 18,
@@ -1612,6 +1692,12 @@ Prüfe nur auf belegbarer Grundlage und nenne Locator zu jedem wesentlichen Befu
 
 Dies ist exakt ein Teil des Originaldokuments. Erstelle ein vollständiges Teilreview nur für diesen Chunk; behalte alle Locator, Gap-IDs, Annahmen und Konfidenzsignale für die spätere rolleninterne Zusammenführung.
 
+${roleChunkNavigation(
+  retrievalDossier,
+  chunk,
+  new Set(assignment.mandates.map((mandate) => mandate.activityId)),
+)}
+
 ORIGINALCHUNK ${chunk.position + 1}/${context.chunks.length}
 LOCATOR: ${chunk.locator}
 SHA256: ${chunk.sha256}
@@ -1628,6 +1714,10 @@ ${chunk.content}`,
             prompt: `${assignmentPrompt}
 
 Führe ausschließlich deine eigenen Teilreviews zu genau einem kanonischen Einzelreview zusammen. Jeder Originalchunk muss im Coverage-Abschnitt mit Locator und Hash vorkommen. Entferne keine Minderheits-, Annahme- oder Konfidenzsignale und erfinde nichts.
+
+Die folgenden Beziehungen sind unverbindliche Navigationshinweise. Prüfe jede übergreifende Aussage gegen die Befunde aus den jeweils separat analysierten Originalchunks und zitiere bei einer Chunk-übergreifenden Aussage alle beteiligten Locator.
+
+${retrievalDossier?.relationshipManifest ?? "Keine zusätzlichen Retrieval-Beziehungen vorhanden."}
 
 COVERAGE-MANIFEST:
 ${context.manifest}
@@ -1741,7 +1831,7 @@ Rufe danach genau einmal submit_peer_review auf:
 
 PRÜFGEGENSTAND:
 ${context.manifest}
-${evidence.slice(0, 12_000)}
+${retrievalDossier?.relationshipManifest ?? "Keine zusätzlichen Retrieval-Beziehungen vorhanden."}
 
 ANONYMISIERTE PEER-REVIEWS:
 ${peers

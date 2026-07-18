@@ -53,7 +53,7 @@ describe("buildApp", () => {
       services: { enqueueRun: vi.fn(() => true) },
     });
     const health = await app.inject({ method: "GET", url: "/api/health" });
-    expect(health.json()).toEqual({ ok: true, version: "0.3.0", schemaVersion: 3 });
+    expect(health.json()).toEqual({ ok: true, version: "0.3.0", schemaVersion: 4 });
 
     const summary = await app.inject({ method: "GET", url: "/api/runs/run?attempt=1" });
     expect(summary.statusCode).toBe(200);
@@ -67,6 +67,37 @@ describe("buildApp", () => {
     expect(file.statusCode).toBe(200);
     expect(file.json().content).toContain("# Geheim");
     expect(file.json().contentHtml).not.toContain("<script");
+  });
+
+  it("liefert kompatible lokale Embedding-Modelle über den Metadaten-Endpunkt", async () => {
+    const db = seed();
+    const listAiBoxEmbeddingModels = vi.fn(async () => [
+      {
+        id: "qwen3-embedding:8b",
+        name: "qwen3-embedding:8b",
+        dimensions: 4096,
+      },
+    ]);
+    app = await buildApp({
+      db,
+      webRoot: false,
+      services: { enqueueRun: vi.fn(() => true), listAiBoxEmbeddingModels },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/providers/aibox/embedding-models",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      {
+        id: "qwen3-embedding:8b",
+        name: "qwen3-embedding:8b",
+        dimensions: 4096,
+      },
+    ]);
+    expect(listAiBoxEmbeddingModels).toHaveBeenCalledOnce();
   });
 
   it("aktualisiert Presentations bei einem Reports-Wiedereinstieg attemptlokal mit stabiler ID", () => {
@@ -178,6 +209,11 @@ describe("buildApp", () => {
     const payload = {
       automaticLanguage: true,
       openRouterRouting: "balanced",
+      embedding: {
+        enabled: true,
+        model: "qwen3-embedding:8b",
+        dimensions: 4096,
+      },
       providers: {
         codex: { model: "gpt-5.5" },
         openrouter: { model: "openai/gpt-5.4" },

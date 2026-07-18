@@ -6,7 +6,8 @@ QA Council prüft hochgeladene Dokumente mit einem nachvollziehbaren Multi-Rolle
 
 - sofortiger Upload ohne Vorabextraktion; sichtbare, resumierbare Seitenextraktion als erster
   Lauf-Schritt mit Tika, PDF-Layout, Codex-Bildbeschreibung und Hash-Cache
-- lückenlose Chunk-Verarbeitung mit Locator, Hash und Coverage-Manifest
+- lückenlose Original-Chunk-Verarbeitung mit Locator, Hash und Coverage-Manifest; bei großen
+  Dokumenten ergänzt ein lokaler Hybridindex unverbindliche RACI- und Querverbindungs-Hinweise
 - Anbieterwahl zwischen serverseitigem Codex-OAuth, OpenRouter und lokaler Ollama-kompatibler AI Box
 - Council-Modi Auto, Quick, Standard und Deep
 - Triage/RACI, isolierte Rollenreviews, Cross-Reviews, Debatte und Synthese gemäß den kanonischen Quellen
@@ -37,7 +38,8 @@ Anschließend ist die Oberfläche unter `http://qa-council.localhost:1355` errei
 
 - Codex: in der Einstellungsseite anmelden; das Pi-Auth-File liegt unter `/data/pi/auth.json`. Als manueller Fallback kann im Container `pi /login` verwendet werden.
 - OpenRouter: API-Key in der Einstellungsseite oder über `OPENROUTER_API_KEY`.
-- AI Box: optional konfigurierbare Ollama-Adresse; Modellliste über `/api/tags`, Inferenz über `/v1`.
+- AI Box: optional konfigurierbare Ollama-Adresse; Council-Inferenz über `/v1`, lokale
+  Dokument-Embeddings über `/api/embed`.
 - `TIKA_URL`: Standard `http://127.0.0.1:9998`.
 - `DATA_DIR`: Standard `./data`, im Container `/data`.
 

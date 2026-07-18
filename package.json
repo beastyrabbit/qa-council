@@ -34,6 +34,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "sanitize-html": "^2.17.6",
+    "sqlite-vec": "^0.1.9",
     "typebox": "1.1.38",
     "typescript-compiler": "npm:typescript@5.9.3",
     "zod": "^4.4.3"

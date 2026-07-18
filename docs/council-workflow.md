@@ -24,6 +24,30 @@ Quick, Standard und Deep durchlaufen dieselben Phasen:
 Der Modus verändert ausschließlich die Zahl der abschließenden Council-Runden: Quick führt eine,
 Standard zwei und Deep drei Runden aus.
 
+## Evidence und große Dokumente
+
+Bis 110.000 Zeichen erhält das RACI-Routing den vollständigen Originaltext. Größere Dokumente
+werden vollständig in geordnete Originalchunks zerlegt. Die Evidence-Phase führt dann keine
+fachliche Modellanalyse pro Chunk aus, sondern baut einen dokumentweiten Hybridindex:
+
+- exakte Begriffe und strukturelle Nachbarschaft;
+- lokale AI-Box-Embeddings für Chunks, kleinere offsettreue Passagen und die 37 RACI-Zeilen;
+- mögliche RACI-Aktivitäten und Rollen pro Chunk;
+- semantische und lexikalische Beziehungen auch zwischen weit auseinanderliegenden Chunks;
+- kurze, unveränderte Originalauszüge mit Locator und Chunk-Hash.
+
+Die daraus erzeugten Belegkarten sind ausdrücklich nur Such- und Navigationshilfen. Sie dürfen
+weder als Fachreview noch als Beleg übernommen werden. Der QA-Architekt prüft ihre Vorschläge
+gegen Originalauszüge und Coverage-Manifest. Danach analysiert jede eingeladene Rolle jeden
+vollständigen Originalchunk in einer isolierten Teilprüfung; die Belegkarte entscheidet nie,
+welcher Text geprüft wird. Die rolleninterne Zusammenführung erhält zusätzlich das dokumentweite
+Beziehungsmanifest und muss chunkübergreifende Aussagen mit allen beteiligten Locator belegen.
+
+So bleibt beispielsweise eine gleichartige Prioritätsaussage in Chunk 1 und Chunk 20 auffindbar,
+ohne beide Texte vorab zu einem scheinbaren Fachbefund zu verdichten. Embeddings dienen dabei
+ausschließlich der Navigation. Bei deaktiviertem oder nicht erreichbarem Embedding-Modell läuft
+dieselbe Phase mit exakten Begriffen und strukturellen Beziehungen weiter.
+
 Jede eingeladene A-, R- oder benötigte C-Rolle erstellt genau ein isoliertes Review. Danach
 bewertet jede Rolle alle fremden, anonymisierten Reviews. `submit_peer_review` enthält nur die
 vollständige Rangfolge der erlaubten Review-IDs und einen ganzzahligen Consensus von 1 bis 5; die

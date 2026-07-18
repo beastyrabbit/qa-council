@@ -33,6 +33,51 @@ export const documentChunks = sqliteTable("document_chunks", {
   sha256: text("sha256").notNull(),
 });
 
+export const documentRetrievalPassages = sqliteTable(
+  "document_retrieval_passages",
+  {
+    id: text("id").primaryKey(),
+    documentId: text("document_id").notNull(),
+    chunkId: text("chunk_id").notNull(),
+    position: integer("position").notNull(),
+    startOffset: integer("start_offset").notNull(),
+    endOffset: integer("end_offset").notNull(),
+    content: text("content").notNull(),
+    sha256: text("sha256").notNull(),
+  },
+  (table) => [
+    index("retrieval_passages_document_idx").on(table.documentId, table.chunkId, table.position),
+  ],
+);
+
+export const embeddingCacheEntries = sqliteTable(
+  "embedding_cache_entries",
+  {
+    id: text("id").primaryKey(),
+    sourceKind: text("source_kind").notNull(),
+    documentId: text("document_id"),
+    sourceId: text("source_id").notNull(),
+    sourceSha256: text("source_sha256").notNull(),
+    model: text("model").notNull(),
+    dimensions: integer("dimensions").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("embedding_cache_source_unique_idx").on(
+      table.sourceKind,
+      table.sourceId,
+      table.sourceSha256,
+      table.model,
+    ),
+    index("embedding_cache_source_idx").on(
+      table.sourceKind,
+      table.documentId,
+      table.sourceId,
+      table.model,
+    ),
+  ],
+);
+
 export const runs = sqliteTable("runs", {
   id: text("id").primaryKey(),
   documentId: text("document_id").notNull(),

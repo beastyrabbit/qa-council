@@ -1,7 +1,7 @@
 /* biome-ignore-all lint/security/noDangerouslySetInnerHtml: Presentation-HTML wird serverseitig per expliziter Allowlist sanitisiert. */
 import { Check, CircleAlert, LoaderCircle, LogIn } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import type { AppSettings, ProviderId } from "../../shared/types";
+import type { AppSettings, EmbeddingModel, ProviderId } from "../../shared/types";
 import { api } from "../lib/api";
 
 import { ModelPicker } from "./ViewShared";
@@ -16,6 +16,11 @@ export function SettingsView({
   const [draft, setDraft] = useState(settings);
   const [keys, setKeys] = useState({ openrouter: "", openaiImage: "" });
   const [message, setMessage] = useState("");
+  const [embeddingModels, setEmbeddingModels] = useState<{
+    loading: boolean;
+    models: EmbeddingModel[];
+    error: string;
+  }>({ loading: false, models: [], error: "" });
   const [comfyCheck, setComfyCheck] = useState<{
     loading: boolean;
     message: string;
@@ -67,6 +72,28 @@ export function SettingsView({
     };
   }, [login?.id, login?.status]);
 
+  useEffect(() => {
+    if (!settings.providers.aibox.baseUrl) return;
+    let active = true;
+    setEmbeddingModels((current) => ({ ...current, loading: true, error: "" }));
+    api<EmbeddingModel[]>("/api/providers/aibox/embedding-models")
+      .then((models) => {
+        if (active) setEmbeddingModels({ loading: false, models, error: "" });
+      })
+      .catch((reason) => {
+        if (active) {
+          setEmbeddingModels({
+            loading: false,
+            models: [],
+            error: reason instanceof Error ? reason.message : String(reason),
+          });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [settings.providers.aibox.baseUrl]);
+
   async function save(event: FormEvent) {
     event.preventDefault();
     setMessage("");
@@ -87,6 +114,7 @@ export function SettingsView({
         }),
       });
       onSaved(saved);
+      setDraft(saved);
       setKeys({ openrouter: "", openaiImage: "" });
       setMessage("Einstellungen gespeichert.");
     } catch (reason) {
@@ -276,6 +304,44 @@ export function SettingsView({
             value={draft.providers.aibox.model}
             onChange={(model) => updateProvider("aibox", { model })}
           />
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={draft.embedding.enabled}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  embedding: { ...draft.embedding, enabled: event.target.checked },
+                })
+              }
+            />
+            Lokale Embeddings für dokumentweite RACI- und Chunk-Beziehungen verwenden
+          </label>
+          <label>
+            <span>Embedding-Modell</span>
+            <input
+              list="aibox-embedding-models"
+              value={draft.embedding.model}
+              disabled={!draft.embedding.enabled}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  embedding: { ...draft.embedding, model: event.target.value },
+                })
+              }
+            />
+            <datalist id="aibox-embedding-models">
+              {embeddingModels.models.map((model) => (
+                <option value={model.id} key={model.id} />
+              ))}
+            </datalist>
+            <small className={embeddingModels.error ? "not-configured" : "configured"}>
+              {embeddingModels.loading
+                ? "Embedding-Modelle werden gelesen …"
+                : embeddingModels.error ||
+                  `${draft.embedding.model} · ${draft.embedding.dimensions} Dimensionen · lokale, gecachte Voranalyse`}
+            </small>
+          </label>
         </div>
       </section>
       <section className="settings-section">

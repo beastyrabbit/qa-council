@@ -183,6 +183,14 @@ export interface ProviderModel {
   supportsTools?: boolean;
 }
 
+export interface EmbeddingModel {
+  id: string;
+  name: string;
+  dimensions?: number;
+  contextWindow?: number;
+  available?: boolean;
+}
+
 export interface ComparisonRecord {
   id: string;
   documentId: string;
@@ -201,6 +209,12 @@ export interface AppSettings {
   >;
   automaticLanguage: boolean;
   openRouterRouting: OpenRouterRoutingMode;
+  embedding: {
+    enabled: boolean;
+    configured: boolean;
+    model: string;
+    dimensions: number;
+  };
   comfyui: {
     enabled: boolean;
     configured: boolean;

@@ -81,6 +81,11 @@ deshalb ist höchstens ein manueller Live-Abnahmelauf zulässig, und auch nur na
 ausdrücklichen Benutzeranweisung für genau diesen Lauf. OpenRouter wird ausschließlich nach einer
 ausdrücklichen OpenRouter-Anweisung getestet.
 
+Retrieval-Tests injizieren deterministische 4.096-dimensionale Testvektoren. Sie rufen weder
+`/api/embed` noch ein anderes Live-Modell auf. Auch ein lokaler Embedding-Abnahmelauf ist eine
+Live-KI-Ausführung und darf nur nach einer ausdrücklichen Benutzeranweisung für genau diesen Lauf
+gestartet werden.
+
 ## Daten und Backups
 
 Für eine vollständige Wiederherstellung müssen gemeinsam gesichert werden:
@@ -178,6 +183,16 @@ curl -fsS http://192.168.10.120:11434/api/ps
 ```
 
 Ein hohes `*.context_length` in `model_info` ist nur das theoretische Maximum. Ein kleineres `PARAMETER num_ctx` im Modelfile oder `context_length` in `/api/ps` ist die wirksame Grenze. Die OpenAI-kompatible Schnittstelle kann diese Grenze nicht pro Council-Request erhöhen; dafür muss die Ollama-Serverkonfiguration oder ein Modellalias angepasst werden.
+
+### Lokale Dokument-Voranalyse verwendet den Retrieval-Rückfall
+
+- In den Einstellungen prüfen, ob lokale Embeddings aktiviert und
+  `qwen3-embedding:8b` ausgewählt ist.
+- `/api/show` muss für das Modell `embedding` in `capabilities` melden.
+- Die konkrete Ursache steht als `embedding_fallback` im Laufprotokoll.
+- Der Lauf bleibt fachlich ausführbar: Originalchunks werden weiterhin vollständig geprüft, nur
+  die semantischen Navigationshinweise fehlen. Exakte Begriffe und Chunk-Nachbarschaften bleiben
+  aktiv.
 
 ### Skill-Integritätsfehler
 

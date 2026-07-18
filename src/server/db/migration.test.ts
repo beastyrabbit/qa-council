@@ -139,4 +139,28 @@ describe("0.3.0-Datenbankmigration", () => {
       database.prepare("SELECT count(*) AS count FROM presentations WHERE run_id = 'r'").get(),
     ).toEqual({ count: 2 });
   });
+
+  it("richtet den rekonstruierbaren Hybrid-Retrieval-Index ein", () => {
+    database = migrateDatabase(new Database(":memory:"));
+    expect(database.pragma("user_version", { simple: true })).toBe(4);
+    expect(database.prepare("SELECT vec_version() AS version").get()).toMatchObject({
+      version: expect.stringMatching(/^v0\.1\./),
+    });
+    expect(
+      database.prepare("SELECT value FROM app_settings WHERE key = 'embeddingConfig'").get(),
+    ).toMatchObject({ value: expect.stringContaining("qwen3-embedding:8b") });
+    expect(
+      database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM sqlite_master
+           WHERE name IN (
+             'document_retrieval_passages',
+             'document_retrieval_fts',
+             'embedding_cache_entries',
+             'embedding_vectors'
+           )`,
+        )
+        .get(),
+    ).toEqual({ count: 4 });
+  });
 });

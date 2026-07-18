@@ -8,6 +8,9 @@ flowchart LR
     A --> D[(SQLite / Drizzle)]
     A --> T[Apache Tika]
     A --> O[Council-Orchestrator]
+    O --> H[Hybrid-Retrieval]
+    H --> E[AI-Box-Embeddings]
+    H --> S[(SQLite FTS5 / sqlite-vec)]
     O --> P[Pi SDK]
     P --> C[Codex OAuth]
     P --> R[OpenRouter]
@@ -57,16 +60,30 @@ docs/                      Projektdokumentation
 6. Vollständige Extraktionen und erfolgreiche Seiten-Checkpoints werden über Dokument-Hash,
    Dateityp, Pipelineversion, Renderer-/Promptversion und Codex-Modell gecacht. Unterbrochene
    Extraktionsläufe werden nach einem Neustart aus den Checkpoints fortgesetzt.
-7. Der extrahierte Text wird vollständig in Chunks mit Position, Locator und Hash zerlegt.
-8. Ein Lauf referenziert Dokument, Provider, Modell, Council-Modus, Fokus und gewünschte erste Darstellung.
-9. Der Orchestrator erzeugt Stufen, Events und virtuelle Artefakte.
-10. Nach der Synthese wird das kanonische finale Markdown gespeichert.
-11. Eine eigene, live sichtbare Pi-Stufe lädt den Report-Designer-Skill und erzeugt aus dem fachlich abgeschlossenen Ergebnis direkt ein HTML-Package mit mehrseitiger Tageszeitung, diagrammreichem Visual Report und Bildbriefing. Sie verwendet keinen Markdown-zu-HTML-Konverter.
-12. Nach der fertigen Report-Antwort prüft der Server einmalig Transportstruktur, HTML-Verschachtelung, erforderliche Seiten und Hooks, das bekannte CSS-Klassenvokabular sowie verbotene JavaScript-Elemente und Attribute. Bei Befunden erhält derselbe Report-Agent den vollständigen Fehlerbericht und genau eine Korrekturrunde; anschließend folgt eine statische Nachprüfung.
-13. Bei Codex und visionfähigen OpenRouter-Modellen rendert Chromium beide HTML-Ausgaben einmal als Screenshot. Eine sichtbare Vision-Stufe darf Hierarchie und Layout daraufhin einmal verbessern; eine weitere statische Vertragsprüfung entscheidet, ob die Revision übernommen wird. Lokale Modelle überspringen diesen Schritt.
-14. Beide Designausgaben werden für jeden Lauf gespeichert. Die Textdarstellung rendert separat das kanonische Markdown.
-15. Jeder neue Lauf kann ein dokumentbezogenes Editorialmotiv erzeugen: Codex über die native OpenAI-Bild-API, OpenRouter nativ bei bildfähigem Modell und sonst optional über ComfyUI, die AI Box optional über ComfyUI. Tageszeitung, Visual Report und PDF desselben Laufs verwenden gemeinsam dieses eine Motiv.
-16. Ein Vergleich legt einen eigenen `comparisons`-Datensatz an und startet je erreichbarer Provider-/Modellwahl einen normalen, aber mit `comparison_id` isolierten Council-Lauf. `/api/runs` liefert diese Läufe bewusst nicht aus; sie werden ausschließlich über die Vergleichs-API und den Testmodus angezeigt.
+7. Der extrahierte Text wird vollständig in Originalchunks mit Position, Locator und Hash zerlegt.
+   Bei großen Dokumenten entstehen zusätzlich kleinere, offsettreue Retrieval-Passagen.
+8. Eine lokale Voranalyse verbindet exakte Begriffe, strukturell benachbarte Chunks und semantisch
+   ähnliche Passagen. Dafür werden standardmäßig `qwen3-embedding:8b` auf der AI Box und ein
+   dokumenthashbasierter `sqlite-vec`-Cache verwendet. Ist das Embedding-Modell nicht erreichbar,
+   bleibt die exakte und strukturelle Analyse verfügbar.
+9. Die Voranalyse erzeugt ausschließlich Such- und Navigationshinweise: mögliche RACI-Aktivitäten,
+   betroffene Rollen, repräsentative Originalauszüge und dokumentweite Chunk-Beziehungen. Sie ist
+   weder Fachreview noch Quelle.
+10. Der QA-Architekt erstellt daraus und aus dem vollständigen Coverage-Manifest den
+    matrixgebundenen Ausführungsplan. Jede eingeladene Fachrolle analysiert anschließend jeden
+    Originalchunk selbst. Keine RACI- oder Vektorwertung darf einen Chunk aus dem Rollenreview
+    ausschließen.
+11. Rolleninterne Zusammenführungen prüfen das dokumentweite Beziehungsmanifest gegen die
+    Originalbefunde. Eine chunkübergreifende Aussage muss alle beteiligten Locator nennen.
+12. Ein Lauf referenziert Dokument, Provider, Modell, Council-Modus, Fokus und gewünschte erste Darstellung.
+13. Der Orchestrator erzeugt Stufen, Events und virtuelle Artefakte.
+14. Nach der Synthese wird das kanonische finale Markdown gespeichert.
+15. Eine eigene, live sichtbare Pi-Stufe lädt den Report-Designer-Skill und erzeugt aus dem fachlich abgeschlossenen Ergebnis direkt ein HTML-Package mit mehrseitiger Tageszeitung, diagrammreichem Visual Report und Bildbriefing. Sie verwendet keinen Markdown-zu-HTML-Konverter.
+16. Nach der fertigen Report-Antwort prüft der Server einmalig Transportstruktur, HTML-Verschachtelung, erforderliche Seiten und Hooks, das bekannte CSS-Klassenvokabular sowie verbotene JavaScript-Elemente und Attribute. Bei Befunden erhält derselbe Report-Agent den vollständigen Fehlerbericht und genau eine Korrekturrunde; anschließend folgt eine statische Nachprüfung.
+17. Bei Codex und visionfähigen OpenRouter-Modellen rendert Chromium beide HTML-Ausgaben einmal als Screenshot. Eine sichtbare Vision-Stufe darf Hierarchie und Layout daraufhin einmal verbessern; eine weitere statische Vertragsprüfung entscheidet, ob die Revision übernommen wird. Lokale Modelle überspringen diesen Schritt.
+18. Beide Designausgaben werden für jeden Lauf gespeichert. Die Textdarstellung rendert separat das kanonische Markdown.
+19. Jeder neue Lauf kann ein dokumentbezogenes Editorialmotiv erzeugen: Codex über die native OpenAI-Bild-API, OpenRouter nativ bei bildfähigem Modell und sonst optional über ComfyUI, die AI Box optional über ComfyUI. Tageszeitung, Visual Report und PDF desselben Laufs verwenden gemeinsam dieses eine Motiv.
+20. Ein Vergleich legt einen eigenen `comparisons`-Datensatz an und startet je erreichbarer Provider-/Modellwahl einen normalen, aber mit `comparison_id` isolierten Council-Lauf. `/api/runs` liefert diese Läufe bewusst nicht aus; sie werden ausschließlich über die Vergleichs-API und den Testmodus angezeigt.
 
 ## Datenbank
 
@@ -76,6 +93,10 @@ Die Datei liegt unter `${DATA_DIR}/qa-council.sqlite`. SQLite läuft im WAL-Modu
 |---|---|
 | `documents` | Original-BLOB, extrahierter Text, MIME-Typ, Größe und Hash |
 | `document_chunks` | Vollständige, geordnete Textabschnitte mit Locator und Hash |
+| `document_retrieval_passages` | Offsettreue, aus Originalchunks abgeleitete Suchpassagen |
+| `document_retrieval_fts` | Ableitbarer FTS5-Index der Suchpassagen |
+| `embedding_cache_entries` | Hash-, Modell- und Dimensionsmetadaten des Vektorcaches |
+| `embedding_vectors` | Ableitbarer `sqlite-vec`-Index für Chunks, Passagen und RACI-Zeilen |
 | `runs` | Konfiguration, Status und Fortschritt eines Council-Laufs |
 | `run_attempts` | Unveränderliche Versuche mit Vorgänger und Wiedereinstiegsphase |
 | `run_checkpoints` | Versionierte Phasen-Checkpoints mit Input-Hash und Output-Referenzen |
@@ -120,6 +141,7 @@ Provider-Keys werden mit AES-256-GCM verschlüsselt. Ohne gesetzten `SETTINGS_EN
 | `GET` | `/api/runs/:id/download` | Finales Ergebnis als Markdown herunterladen |
 | `GET` | `/api/presentations/:id/pdf` | Visual Report als mehrseitiges PDF laden |
 | `GET` | `/api/providers/:provider/models` | Verfügbare Modelle abrufen |
+| `GET` | `/api/providers/aibox/embedding-models` | Lokale Modelle mit Embedding-Capability abrufen |
 | `GET` | `/api/settings` | Bereinigte Einstellungen ohne Secret-Werte |
 | `PUT` | `/api/settings` | Modelle, Endpunkte, Sprache und API-Key aktualisieren |
 | `POST` | `/api/auth/codex/start` | Codex-OAuth starten |

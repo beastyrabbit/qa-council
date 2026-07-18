@@ -3,9 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
+import * as sqliteVec from "sqlite-vec";
 import * as schema from "./schema.js";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export type SqliteDatabase = Database.Database;
 
 const databaseContext = new AsyncLocalStorage<SqliteDatabase>();
@@ -96,6 +97,7 @@ function migratePresentations(database: SqliteDatabase) {
 export function migrateDatabase(database: SqliteDatabase) {
   database.pragma("journal_mode = WAL");
   database.pragma("foreign_keys = ON");
+  sqliteVec.load(database);
   database.exec(`
     CREATE TABLE IF NOT EXISTS documents (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, mime_type TEXT NOT NULL, size INTEGER NOT NULL,
@@ -109,6 +111,32 @@ export function migrateDatabase(database: SqliteDatabase) {
       position INTEGER NOT NULL, locator TEXT NOT NULL, content TEXT NOT NULL, sha256 TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS chunks_document_idx ON document_chunks(document_id, position);
+    CREATE TABLE IF NOT EXISTS document_retrieval_passages (
+      id TEXT PRIMARY KEY,
+      document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+      chunk_id TEXT NOT NULL REFERENCES document_chunks(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL,
+      start_offset INTEGER NOT NULL,
+      end_offset INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      sha256 TEXT NOT NULL,
+      UNIQUE(chunk_id, position)
+    );
+    CREATE INDEX IF NOT EXISTS retrieval_passages_document_idx
+      ON document_retrieval_passages(document_id, chunk_id, position);
+    CREATE TABLE IF NOT EXISTS embedding_cache_entries (
+      id TEXT PRIMARY KEY,
+      source_kind TEXT NOT NULL,
+      document_id TEXT REFERENCES documents(id) ON DELETE CASCADE,
+      source_id TEXT NOT NULL,
+      source_sha256 TEXT NOT NULL,
+      model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(source_kind, source_id, source_sha256, model)
+    );
+    CREATE INDEX IF NOT EXISTS embedding_cache_source_idx
+      ON embedding_cache_entries(source_kind, document_id, source_id, model);
     CREATE TABLE IF NOT EXISTS document_extraction_pages (
       id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
       page INTEGER NOT NULL, total_pages INTEGER NOT NULL, unit TEXT NOT NULL,
@@ -212,6 +240,47 @@ export function migrateDatabase(database: SqliteDatabase) {
     );
   `);
 
+  database.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS document_retrieval_fts USING fts5(
+      passage_id UNINDEXED,
+      document_id UNINDEXED,
+      chunk_id UNINDEXED,
+      locator,
+      content,
+      tokenize = 'unicode61 remove_diacritics 2'
+    );
+    CREATE VIRTUAL TABLE IF NOT EXISTS embedding_vectors USING vec0(
+      id TEXT PRIMARY KEY,
+      embedding float[4096] distance_metric=cosine,
+      document_id TEXT,
+      source_kind TEXT,
+      chunk_id TEXT,
+      model TEXT,
+      +source_id TEXT
+    );
+    CREATE TRIGGER IF NOT EXISTS retrieval_passages_insert_fts
+    AFTER INSERT ON document_retrieval_passages BEGIN
+      INSERT INTO document_retrieval_fts(passage_id, document_id, chunk_id, locator, content)
+      SELECT NEW.id, NEW.document_id, NEW.chunk_id, chunks.locator, NEW.content
+      FROM document_chunks AS chunks WHERE chunks.id = NEW.chunk_id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS retrieval_passages_delete_fts
+    AFTER DELETE ON document_retrieval_passages BEGIN
+      DELETE FROM document_retrieval_fts WHERE passage_id = OLD.id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS retrieval_passages_update_fts
+    AFTER UPDATE ON document_retrieval_passages BEGIN
+      DELETE FROM document_retrieval_fts WHERE passage_id = OLD.id;
+      INSERT INTO document_retrieval_fts(passage_id, document_id, chunk_id, locator, content)
+      SELECT NEW.id, NEW.document_id, NEW.chunk_id, chunks.locator, NEW.content
+      FROM document_chunks AS chunks WHERE chunks.id = NEW.chunk_id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS embedding_cache_delete_vector
+    AFTER DELETE ON embedding_cache_entries BEGIN
+      DELETE FROM embedding_vectors WHERE id = OLD.id;
+    END;
+  `);
+
   addColumnIfMissing(database, "runs", "archived_at", "TEXT");
   addColumnIfMissing(database, "documents", "deleted_at", "TEXT");
   addColumnIfMissing(database, "documents", "extraction_fingerprint", "TEXT");
@@ -274,6 +343,15 @@ export function migrateDatabase(database: SqliteDatabase) {
   database
     .prepare("INSERT OR IGNORE INTO app_settings(key, value) VALUES ('automaticLanguage', 'true')")
     .run();
+  database
+    .prepare("INSERT OR IGNORE INTO app_settings(key, value) VALUES ('embeddingConfig', ?)")
+    .run(
+      JSON.stringify({
+        enabled: true,
+        model: "qwen3-embedding:8b",
+        dimensions: 4096,
+      }),
+    );
   database
     .prepare(
       "INSERT OR IGNORE INTO app_settings(key, value) VALUES ('openRouterRouting', 'balanced')",

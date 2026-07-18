@@ -47,6 +47,7 @@ import {
 import { createPresentationPdf } from "./pdf.js";
 import { markdownHtml } from "./presentation.js";
 import { codexAuthStatus, getAuthStorage, listModels } from "./providers.js";
+import { EMBEDDING_DIMENSIONS, embeddingConfig, listAiBoxEmbeddingModels } from "./retrieval.js";
 import { safeParse } from "./safe-json.js";
 import type { RunScheduler } from "./scheduler.js";
 import { sha256 } from "./skills.js";
@@ -56,6 +57,7 @@ export interface AppServices {
   cancelRun: typeof cancelRun;
   resumeRunWithAnswer: typeof resumeRunWithAnswer;
   listModels: typeof listModels;
+  listAiBoxEmbeddingModels: typeof listAiBoxEmbeddingModels;
   codexAuthStatus: typeof codexAuthStatus;
   getAuthStorage: typeof getAuthStorage;
 }
@@ -82,6 +84,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     cancelRun: options.services?.cancelRun ?? cancelRun,
     resumeRunWithAnswer: options.services?.resumeRunWithAnswer ?? resumeRunWithAnswer,
     listModels: options.services?.listModels ?? listModels,
+    listAiBoxEmbeddingModels:
+      options.services?.listAiBoxEmbeddingModels ?? listAiBoxEmbeddingModels,
     codexAuthStatus: options.services?.codexAuthStatus ?? codexAuthStatus,
     getAuthStorage: options.services?.getAuthStorage ?? getAuthStorage,
   };
@@ -1156,6 +1160,19 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     return services.listModels(provider as ProviderId);
   });
 
+  app.get("/api/providers/aibox/embedding-models", async (_request, reply) => {
+    try {
+      return await services.listAiBoxEmbeddingModels();
+    } catch (error) {
+      return reply.code(502).send({
+        error:
+          error instanceof Error
+            ? error.message
+            : "AI-Box-Embedding-Modelle konnten nicht geladen werden.",
+      });
+    }
+  });
+
   app.post("/api/comfyui/discover", async (request, reply) => {
     const parsed = z.object({ baseUrl: z.string().url() }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues });
@@ -1218,6 +1235,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const routing = sqlite
       .prepare("SELECT value FROM app_settings WHERE key = 'openRouterRouting'")
       .get() as { value: string } | undefined;
+    const embedding = embeddingConfig();
     const comfyui = getComfyUiConfig();
     return {
       providers: {
@@ -1228,6 +1246,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       automaticLanguage: language?.value !== "false",
       openRouterRouting:
         routing?.value === "lowest" || routing?.value === "fastest" ? routing.value : "balanced",
+      embedding: {
+        ...embedding,
+        configured: Boolean(provider("aibox").baseUrl && embedding.model),
+      },
       comfyui: {
         ...comfyui,
         configured: Boolean(comfyui.baseUrl && comfyui.checkpoint),
@@ -1242,6 +1264,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       .object({
         automaticLanguage: z.boolean(),
         openRouterRouting: z.enum(["balanced", "lowest", "fastest"]),
+        embedding: z.object({
+          enabled: z.boolean(),
+          model: z.string().min(1),
+          dimensions: z.literal(EMBEDDING_DIMENSIONS),
+        }),
         comfyui: z
           .object({
             enabled: z.boolean(),
@@ -1303,6 +1330,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           "INSERT INTO app_settings(key, value) VALUES ('openRouterRouting', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         )
         .run(parsed.data.openRouterRouting);
+      sqlite
+        .prepare(
+          "INSERT INTO app_settings(key, value) VALUES ('embeddingConfig', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        )
+        .run(JSON.stringify(parsed.data.embedding));
       saveComfyUiConfig(parsed.data.comfyui);
     });
     transaction();
