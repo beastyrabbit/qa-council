@@ -159,7 +159,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   app.get("/api/health", async () => ({
     ok: true,
-    version: "0.4.1",
+    version: "0.4.2",
     schemaVersion: SCHEMA_VERSION,
   }));
 

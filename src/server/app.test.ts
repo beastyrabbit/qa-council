@@ -45,7 +45,7 @@ function seed() {
 }
 
 describe("buildApp", () => {
-  it("liefert Health 0.4.1 und hält große Inhalte aus der Summary fern", async () => {
+  it("liefert Health 0.4.2 und hält große Inhalte aus der Summary fern", async () => {
     const db = seed();
     app = await buildApp({
       db,
@@ -53,7 +53,7 @@ describe("buildApp", () => {
       services: { enqueueRun: vi.fn(() => true) },
     });
     const health = await app.inject({ method: "GET", url: "/api/health" });
-    expect(health.json()).toEqual({ ok: true, version: "0.4.1", schemaVersion: 4 });
+    expect(health.json()).toEqual({ ok: true, version: "0.4.2", schemaVersion: 4 });
 
     const summary = await app.inject({ method: "GET", url: "/api/runs/run?attempt=1" });
     expect(summary.statusCode).toBe(200);

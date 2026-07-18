@@ -29,6 +29,12 @@ function escapeHtml(value: string) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
+export function renderedResultClassFor(html: string) {
+  return html.includes("data-report-workspace")
+    ? "rendered-result rendered-result--authored"
+    : "rendered-result";
+}
+
 async function loadApplicationCss() {
   const sourcePath = path.resolve("src/web/styles.css");
   try {
@@ -45,11 +51,12 @@ async function temporaryDocument(html: string, title: string, prefix: string, ex
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   const inputPath = path.join(directory, "presentation.html");
   const css = await loadApplicationCss();
+  const renderedResultClass = renderedResultClassFor(html);
   await fs.writeFile(
     inputPath,
     `<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${escapeHtml(
       title,
-    )}</title><style>${css}\n${baseDocumentCss}\n${extraCss}</style></head><body><div class="rendered-result">${html}</div></body></html>`,
+    )}</title><style>${css}\n${baseDocumentCss}\n${extraCss}</style></head><body><div class="${renderedResultClass}">${html}</div></body></html>`,
     "utf8",
   );
   return { directory, inputPath };
