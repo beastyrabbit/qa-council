@@ -1,6 +1,13 @@
 /* biome-ignore-all lint/security/noDangerouslySetInnerHtml: Presentation-HTML wird serverseitig per expliziter Allowlist sanitisiert. */
-import { ArrowLeft, Copy, Download, ListChecks, LoaderCircle } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { ArrowLeft, CircleX, Copy, Download, ListChecks } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import type {
   DerivedAnalysisRecord,
   PresentationKind,
@@ -9,8 +16,15 @@ import type {
 } from "../../shared/types";
 import { api } from "../lib/api";
 import { SanitizedMarkdown } from "./SanitizedMarkdown";
-
 import { FORMAT_NAMES } from "./ViewShared";
+
+type TabReadiness = "available" | "building" | "missing";
+
+function ReadinessDot({ state }: { state: TabReadiness }) {
+  if (state === "available") return <span className="size-1.5 rounded-full bg-primary" />;
+  if (state === "building") return <Spinner className="size-3 text-muted-foreground" />;
+  return <span className="size-1.5 rounded-full border border-muted-foreground/50" />;
+}
 
 export function ResultView({
   presentationId,
@@ -32,6 +46,7 @@ export function ResultView({
   const [presentationContent, setPresentationContent] = useState<PresentationRecord | null>(null);
   const [top10, setTop10] = useState<DerivedAnalysisRecord | null>(null);
   const [startingTop10, setStartingTop10] = useState(false);
+  const scrollPositions = useRef<Record<string, number>>({});
   const load = useCallback(
     async (preferredKind?: PresentationKind) => {
       const reference = await api<PresentationRecord>(`/api/presentations/${presentationId}`);
@@ -76,7 +91,31 @@ export function ResultView({
     }
   }, [onPresentationChange, presentation, presentationId, section]);
 
+  const contentKey = `${section}-${kind}-${pageSlug ?? ""}`;
+  useEffect(() => {
+    if (section === "presentation" && !renderedHtml) return;
+    window.scrollTo(0, scrollPositions.current[contentKey] ?? 0);
+  }, [contentKey, section, renderedHtml]);
+
+  function rememberScroll() {
+    scrollPositions.current[contentKey] = window.scrollY;
+  }
+
+  const runTerminal = details
+    ? ["completed", "failed", "cancelled"].includes(details.run.status)
+    : false;
+  const reportsAreBuilding = Boolean(
+    details?.artifacts.some((item) => item.kind === "final") && details && !runTerminal,
+  );
+
+  function readinessFor(item: PresentationKind): TabReadiness {
+    if (details?.presentations.some((entry) => entry.kind === item)) return "available";
+    if (reportsAreBuilding) return "building";
+    return "missing";
+  }
+
   async function selectPresentation(next: PresentationKind) {
+    rememberScroll();
     setSection("presentation");
     setKind(next);
     const existing = details?.presentations.find((item) => item.kind === next);
@@ -84,10 +123,6 @@ export function ResultView({
       onPresentationChange(existing.id);
       return;
     }
-    const reportsAreBuilding =
-      details?.artifacts.some((item) => item.kind === "final") &&
-      details &&
-      !["completed", "failed", "cancelled"].includes(details.run.status);
     if (reportsAreBuilding) return;
     setCreating(true);
     setError("");
@@ -125,80 +160,104 @@ export function ResultView({
   }
 
   return (
-    <div className="result-page">
-      <div className="result-toolbar">
-        <button className="button button--quiet" type="button" onClick={onBack}>
-          <ArrowLeft size={17} /> Zurück
-        </button>
-        <div className="result-tabs" role="tablist" aria-label="Darstellung">
-          {(Object.keys(FORMAT_NAMES) as PresentationKind[]).map((item) => (
-            <button
-              className={kind === item ? "active" : ""}
-              type="button"
-              role="tab"
-              id={`result-tab-${item}`}
-              aria-controls="result-presentation-panel"
-              aria-selected={kind === item}
-              tabIndex={kind === item ? 0 : -1}
-              key={item}
-              onClick={() => void selectPresentation(item)}
-            >
-              {FORMAT_NAMES[item]}
-            </button>
-          ))}
-        </div>
-        <div className="result-toolbar__actions">
-          <button
-            className="button button--primary"
-            type="button"
-            disabled={startingTop10}
-            onClick={() => void startTop10()}
+    <div className="result-page min-h-svh bg-[#e7e1d6] dark:bg-[#26251f]">
+      <div className="result-toolbar sticky top-0 z-20 flex flex-wrap items-center gap-3 border-b bg-background/95 px-4 py-2 backdrop-blur">
+        <Button variant="ghost" size="sm" onClick={onBack}>
+          <ArrowLeft /> Zurück
+        </Button>
+        <Tabs
+          className="result-tabs"
+          value={kind}
+          onValueChange={(value) => value && void selectPresentation(value as PresentationKind)}
+        >
+          <TabsList aria-label="Darstellung">
+            {(Object.keys(FORMAT_NAMES) as PresentationKind[]).map((item) => (
+              <TabsTrigger value={item} id={`result-tab-${item}`} key={item} className="gap-1.5">
+                <ReadinessDot state={readinessFor(item)} />
+                {FORMAT_NAMES[item]}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+        <div className="result-toolbar__actions ml-auto flex flex-wrap items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              void navigator.clipboard.writeText(window.location.href);
+              toast.success("Link kopiert.");
+            }}
           >
-            <ListChecks size={16} />
-            {startingTop10 ? "Wird gestartet …" : "Top 10 nächste Schritte"}
-          </button>
-          <button
-            className="button button--quiet"
-            type="button"
-            onClick={() => void navigator.clipboard.writeText(window.location.href)}
-          >
-            <Copy size={16} /> URL kopieren
-          </button>
+            <Copy /> URL kopieren
+          </Button>
           {kind === "onepaper" && (
-            <a className="button button--quiet" href={`/api/presentations/${presentationId}/pdf`}>
-              <Download size={17} /> PDF
-            </a>
+            <Button
+              variant="outline"
+              size="sm"
+              render={<a href={`/api/presentations/${presentationId}/pdf`} />}
+            >
+              <Download /> PDF
+            </Button>
           )}
-          <a className="button button--quiet" href={`/api/runs/${runId}/download`}>
-            <Download size={17} /> Markdown
-          </a>
+          <Button variant="outline" size="sm" render={<a href={`/api/runs/${runId}/download`} />}>
+            <Download /> Markdown
+          </Button>
         </div>
       </div>
-      <nav className="result-subnav" aria-label="Ergebnisbereiche">
-        <button
-          className={section === "presentation" ? "active" : ""}
-          type="button"
-          onClick={() => setSection("presentation")}
+      <nav
+        className="result-subnav sticky top-[49px] z-10 flex items-center gap-1 border-b bg-background/90 px-4 py-1.5 backdrop-blur"
+        aria-label="Ergebnisbereiche"
+      >
+        <Button
+          variant={section === "presentation" ? "secondary" : "ghost"}
+          size="sm"
+          onClick={() => {
+            rememberScroll();
+            setSection("presentation");
+          }}
         >
           Ergebnis
-        </button>
-        <button
-          className={section === "top10" ? "active" : ""}
-          type="button"
-          onClick={() => setSection("top10")}
+        </Button>
+        <Button
+          variant={section === "top10" ? "secondary" : "ghost"}
+          size="sm"
+          className="gap-1.5"
+          onClick={() => {
+            rememberScroll();
+            setSection("top10");
+          }}
         >
+          <ListChecks />
           Top 10
-        </button>
+          {top10 && ["queued", "running"].includes(top10.status) && <Spinner className="size-3" />}
+        </Button>
       </nav>
-      {error && <p className="notice notice--error">{error}</p>}
+      {error && (
+        <Alert variant="destructive" className="mx-auto mt-6 w-full max-w-3xl">
+          <CircleX />
+          <AlertTitle>Fehler</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
       {section === "presentation" && pageSlug && presentation && !newspaperPage && (
-        <p className="notice notice--error">Diese Zeitungsseite wurde nicht gefunden.</p>
+        <Alert variant="destructive" className="mx-auto mt-6 w-full max-w-3xl">
+          <CircleX />
+          <AlertDescription>Diese Zeitungsseite wurde nicht gefunden.</AlertDescription>
+        </Alert>
+      )}
+      {section === "presentation" && !renderedHtml && !details && !error && (
+        <div className="mx-auto mt-8 flex w-full max-w-4xl flex-col gap-4 rounded-lg bg-background/60 p-8">
+          <Skeleton className="h-10 w-2/3" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+          <Skeleton className="h-64 w-full" />
+        </div>
       )}
       {section === "presentation" &&
         (creating ||
           (!presentation && details?.artifacts.some((item) => item.kind === "final"))) && (
-          <div className="result-loading">
-            <LoaderCircle className="spin" />{" "}
+          <div className="result-loading mx-auto mt-8 flex w-fit items-center gap-2.5 rounded-lg bg-background/80 px-5 py-3 text-sm text-muted-foreground">
+            <Spinner />
             {creating
               ? "Darstellung wird aus dem finalen Ergebnis erzeugt …"
               : `${FORMAT_NAMES[kind]} wird im Hintergrund gestaltet und geprüft …`}
@@ -215,31 +274,32 @@ export function ResultView({
         />
       )}
       {section === "top10" && (
-        <main className="result-support result-support--top10">
-          <header>
-            <span>HANDLUNGSPLAN</span>
-            <h1>Top 10 nächste Schritte</h1>
-            <p>
+        <main className="result-support result-support--top10 mx-auto my-8 w-full max-w-3xl rounded-lg border bg-(--paper) p-8 shadow-sm">
+          <header className="mb-5">
+            <span className="block text-[10px] font-semibold tracking-widest uppercase opacity-60">
+              Handlungsplan
+            </span>
+            <h1 className="mt-1 font-serif text-2xl font-bold">Top 10 nächste Schritte</h1>
+            <p className={cn("mt-1 text-sm opacity-75")}>
               Aus dem finalen Ergebnis abgeleitet und gegen die isolierten Einzelreviews geprüft.
             </p>
           </header>
           {!top10 && (
-            <button
-              className="button button--primary"
-              type="button"
-              disabled={startingTop10}
-              onClick={() => void startTop10()}
-            >
-              <ListChecks size={16} /> Analyse starten
-            </button>
+            <Button disabled={startingTop10} onClick={() => void startTop10()}>
+              {startingTop10 ? <Spinner /> : <ListChecks />}
+              {startingTop10 ? "Wird gestartet …" : "Analyse starten"}
+            </Button>
           )}
           {top10 && ["queued", "running"].includes(top10.status) && (
-            <div className="result-loading">
-              <LoaderCircle className="spin" /> Empfehlungen werden belegt und priorisiert …
+            <div className="flex items-center gap-2.5 text-sm opacity-75">
+              <Spinner /> Empfehlungen werden belegt und priorisiert …
             </div>
           )}
           {top10?.status === "failed" && (
-            <p className="notice notice--error">{top10.error ?? "Analyse fehlgeschlagen."}</p>
+            <Alert variant="destructive">
+              <CircleX />
+              <AlertDescription>{top10.error ?? "Analyse fehlgeschlagen."}</AlertDescription>
+            </Alert>
           )}
           {top10?.outputHtml && <SanitizedMarkdown html={top10.outputHtml} />}
         </main>

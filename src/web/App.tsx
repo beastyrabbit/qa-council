@@ -9,7 +9,7 @@ import {
   Sheet,
   WifiOff,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -249,6 +249,7 @@ export function App() {
   const [view, setView] = useState<MainView>(initialRoute.view);
   const [connectionLost, setConnectionLost] = useState(false);
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
+  const settingsDirtyRef = useRef(false);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [comparisons, setComparisons] = useState<ComparisonRecord[]>([]);
@@ -328,7 +329,7 @@ export function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  const navigateView = useCallback((nextView: MainView) => {
+  const doNavigateView = useCallback((nextView: MainView) => {
     window.history.pushState({}, "", VIEW_PATHS[nextView]);
     setDocumentId(null);
     setDetailId(null);
@@ -340,6 +341,26 @@ export function App() {
     setFileAttempt(null);
     setView(nextView);
   }, []);
+
+  const navigateView = useCallback(
+    (nextView: MainView) => {
+      if (settingsDirtyRef.current) {
+        setConfirmRequest({
+          title: "Ungespeicherte Änderungen verwerfen?",
+          description:
+            "Die Einstellungen wurden noch nicht gespeichert und gehen beim Verlassen verloren.",
+          confirmLabel: "Trotzdem verlassen",
+          action: () => {
+            settingsDirtyRef.current = false;
+            doNavigateView(nextView);
+          },
+        });
+        return;
+      }
+      doNavigateView(nextView);
+    },
+    [doNavigateView],
+  );
 
   const openRun = useCallback((id: string) => {
     window.history.pushState({}, "", `/laeufe/${id}`);
@@ -662,7 +683,13 @@ export function App() {
     content = (
       <>
         {view === "settings" && settings ? (
-          <SettingsView settings={settings} onSaved={setSettings} />
+          <SettingsView
+            settings={settings}
+            onSaved={setSettings}
+            onDirtyChange={(dirty) => {
+              settingsDirtyRef.current = dirty;
+            }}
+          />
         ) : null}
         {view === "tests" && settings ? (
           <TestModeView
