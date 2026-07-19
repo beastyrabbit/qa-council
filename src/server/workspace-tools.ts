@@ -83,9 +83,26 @@ export interface WorkspaceToolSet {
 
 export async function createWorkspaceReadEditTools(
   workspaceDir: string,
+  options: { editableFiles?: string[] } = {},
 ): Promise<WorkspaceToolSet> {
   const root = await canonicalWorkspaceRoot(workspaceDir);
   const resolveFile = (absolutePath: string) => canonicalExistingFile(root, absolutePath);
+  const editableFiles = options.editableFiles
+    ? new Set(
+        options.editableFiles.map((file) => {
+          assertWorkspaceRelativePath(file);
+          return file.replaceAll("\\", "/");
+        }),
+      )
+    : null;
+  const resolveEditableFile = async (absolutePath: string) => {
+    const file = await resolveFile(absolutePath);
+    const relative = path.relative(root, file).replaceAll("\\", "/");
+    if (editableFiles && !editableFiles.has(relative)) {
+      throw new Error(`Workspace-Datei ist schreibgeschützt: ${relative}`);
+    }
+    return file;
+  };
 
   const readOperations: ReadOperations = {
     async access(absolutePath) {
@@ -102,7 +119,7 @@ export async function createWorkspaceReadEditTools(
   };
   const editOperations: EditOperations = {
     async access(absolutePath) {
-      const file = await resolveFile(absolutePath);
+      const file = await resolveEditableFile(absolutePath);
       await fs.access(file, constants.R_OK | constants.W_OK);
     },
     async readFile(absolutePath) {
@@ -110,7 +127,7 @@ export async function createWorkspaceReadEditTools(
       return fs.readFile(file);
     },
     async writeFile(absolutePath, content) {
-      const file = await resolveFile(absolutePath);
+      const file = await resolveEditableFile(absolutePath);
       await fs.access(file, constants.R_OK | constants.W_OK);
       await fs.writeFile(file, content, "utf8");
     },

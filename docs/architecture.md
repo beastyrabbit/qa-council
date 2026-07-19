@@ -86,10 +86,20 @@ docs/                      Projektdokumentation
 13. Ein Lauf referenziert Dokument, Provider, Modell, Council-Modus, Fokus und gewünschte erste Darstellung.
 14. Der Orchestrator erzeugt Stufen, Events und virtuelle Artefakte.
 15. Nach der Synthese wird das kanonische finale Markdown gespeichert.
-16. Eine eigene, live sichtbare Pi-Stufe lädt den Report-Designer-Skill und erzeugt aus dem fachlich abgeschlossenen Ergebnis direkt ein HTML-Package mit mehrseitiger Tageszeitung, diagrammreichem Visual Report und Bildbriefing. Sie verwendet keinen Markdown-zu-HTML-Konverter.
-17. Nach der fertigen Report-Antwort prüft der Server einmalig Transportstruktur, HTML-Verschachtelung, erforderliche Seiten und Hooks, das bekannte CSS-Klassenvokabular sowie verbotene JavaScript-Elemente und Attribute. Bei Befunden erhält derselbe Report-Agent den vollständigen Fehlerbericht und genau eine Korrekturrunde; anschließend folgt eine statische Nachprüfung.
+16. Eine eigene, live sichtbare Pi-Stufe lädt den Report-Designer-Skill und erzeugt aus der finalen
+    Synthese direkt ein HTML-Package: eine prägnante Titelseite mit fünf Ergebnisartikeln sowie
+    einen Visual Report über Urteil, Gründe, Risiken, Maßnahmen, Belege und Restunsicherheit.
+    Interne Cross-Reviews, Rollen, Debatten und Council-Runden bleiben im Audit, werden aber nicht
+    zu Leserressorts.
+17. Der Report-Agent darf ausschließlich HTML und das statische Bildmanifest bearbeiten. Das
+    geprüfte System-CSS ist schreibgeschützt und stellt kollisionsfreie responsive Layouts bereit.
+    Nach der Report-Antwort prüft der Server Transportstruktur, HTML-Verschachtelung, erforderliche
+    Seiten und Hooks, das bekannte CSS-Klassenvokabular sowie verbotene aktive Inhalte. Bei
+    Befunden folgt genau eine Korrekturrunde und eine statische Nachprüfung.
 18. Bei Codex und visionfähigen OpenRouter-Modellen rendert Chromium beide HTML-Ausgaben einmal als Screenshot. Eine sichtbare Vision-Stufe darf Hierarchie und Layout daraufhin einmal verbessern; eine weitere statische Vertragsprüfung entscheidet, ob die Revision übernommen wird. Lokale Modelle überspringen diesen Schritt.
-19. Beide Designausgaben werden für jeden Lauf gespeichert. Die Textdarstellung rendert separat das kanonische Markdown.
+19. Beide Designausgaben werden für jeden Lauf gespeichert. Die Textdarstellung rendert separat
+    die vollständige finale Synthese; beim Öffnen wird sie auch für ältere Presentations erneut
+    aus dem unveränderten finalen Artefakt aufgebaut.
 20. Jeder neue Lauf kann ein dokumentbezogenes Editorialmotiv erzeugen: Codex über die native OpenAI-Bild-API, OpenRouter nativ bei bildfähigem Modell und sonst optional über ComfyUI, die AI Box optional über ComfyUI. Tageszeitung, Visual Report und PDF desselben Laufs verwenden gemeinsam dieses eine Motiv.
 21. Ein Vergleich legt einen eigenen `comparisons`-Datensatz an und startet je erreichbarer Provider-/Modellwahl einen normalen, aber mit `comparison_id` isolierten Council-Lauf. `/api/runs` liefert diese Läufe bewusst nicht aus; sie werden ausschließlich über die Vergleichs-API und den Testmodus angezeigt.
 
@@ -161,11 +171,14 @@ Provider-Keys werden mit AES-256-GCM verschlüsselt. Ohne gesetzten `SETTINGS_EN
 - Fachreview-Sessions erhalten keine Datei-, Shell- oder sonstigen Werkzeuge.
 - Strukturierte Supervisor-Sessions erhalten ausschließlich das jeweils erlaubte Submit-Tool.
 - Report-Designer-Sessions erhalten ausschließlich isolierte `read`-/`edit`-Werkzeuge im
-  temporären Report-Workspace.
+  temporären Report-Workspace. Das `edit`-Werkzeug ist auf `index.html` und `report.ts`
+  beschränkt; `styles.css` ist nur lesbar.
 - Jede Session verwendet `SessionManager.inMemory()`.
 - Pi-Kontextkompaktierung ist aktiviert; jede fachliche Modellstufe bleibt eine eigene In-Memory-Session mit vollständig neu geladenen, hash-geprüften Skillregeln.
 - Systemprompts werden ausschließlich aus hash-geprüften Projektquellen erzeugt.
-- Tageszeitung und Visual Report werden vom Report-Designer direkt als HTML erzeugt. Der Server entfernt vor der Speicherung alle nicht erlaubten Tags und Attribute und ergänzt nur Navigation, stabile URLs und PDF-Hooks.
+- Tageszeitung und Visual Report werden vom Report-Designer direkt als HTML erzeugt. Der Server
+  entfernt vor der Speicherung alle nicht erlaubten Tags und Attribute, weist unbekannte
+  CSS-Klassen zurück und ergänzt nur Navigation, stabile URLs und PDF-Hooks.
 - Versteckte Thinking-Deltas werden aus dem Ereignisprotokoll ausgeschlossen.
 - Die Ablaufgrafik der Laufdetailseite leitet ihre Phasen und Parallelspuren ausschließlich aus
   `run_stages` ab. Ein ausgewählter Knoten filtert das echte Activity-Protokoll per `stageId`.

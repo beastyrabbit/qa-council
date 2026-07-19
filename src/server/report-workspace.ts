@@ -191,48 +191,85 @@ export const reportManifest = {
 
 function newspaperHtml(documentName: string, pages: NewspaperPageTemplate[]) {
   const safeName = escapeHtml(documentName);
+  const articleIntents: Record<string, { kicker: string; headline: string; summary: string }> = {
+    urteil: {
+      kicker: "Das Urteil",
+      headline: "Die Entscheidung und ihre <em>Bedingungen</em>",
+      summary:
+        "Das Gesamturteil in Klartext erklären: Entscheidung, Reichweite, Bedingungen und verbleibende Unsicherheit.",
+    },
+    staerken: {
+      kicker: "Was trägt",
+      headline: "Die belastbare <em>Substanz</em>",
+      summary:
+        "Die wichtigsten Stärken des geprüften Ergebnisses erklären und sauber von bloßen Annahmen trennen.",
+    },
+    risiken: {
+      kicker: "Wo es noch hakt",
+      headline: "Risiken, Lücken und <em>Folgen</em>",
+      summary:
+        "Die entscheidungsrelevanten Schwächen nach Wirkung ordnen und verständlich erklären.",
+    },
+    massnahmen: {
+      kicker: "Was jetzt zu tun ist",
+      headline: "Vom Befund zur <em>Verbesserung</em>",
+      summary:
+        "Priorisierte Maßnahmen mit Verantwortlichkeit, Abnahmekriterium und sinnvoller Reihenfolge darstellen.",
+    },
+    belege: {
+      kicker: "Warum das Urteil trägt",
+      headline: "Die wichtigsten <em>Begründungen</em>",
+      summary:
+        "Die zentralen Aussagen des Ergebnisses anhand ihrer stärksten Fundstellen nachvollziehbar machen.",
+    },
+  };
   const pageMarkup = pages
-    .map(
-      (page, index) => `<page slug="${escapeHtml(page.slug)}" title="${escapeHtml(page.title)}">
+    .map((page, index) => {
+      const intent = articleIntents[page.slug] ?? {
+        kicker: page.title,
+        headline: `${escapeHtml(page.title)} im <em>Detail</em>`,
+        summary: "Den fachlichen Teil des finalen Ergebnisses verständlich erklären.",
+      };
+      return `<page slug="${escapeHtml(page.slug)}" title="${escapeHtml(page.title)}">
   <article class="news-layout ${index % 2 ? "news-layout--sidebar" : "news-layout--columns"}">
     <header class="news-wide news-section-head">
-      <span class="news-kicker">${escapeHtml(page.title)}</span>
-      <h1>${index === 0 ? "Die Entscheidung im <em>Detail</em>" : `${escapeHtml(page.title)}: die belastbaren <em>Befunde</em>`}</h1>
-      <p class="news-summary">Diesen Vorspann anhand des finalen Council-Ergebnisses präzisieren.</p>
+      <span class="news-kicker">${intent.kicker}</span>
+      <h1>${intent.headline}</h1>
+      <p class="news-summary">${intent.summary}</p>
     </header>
     <section class="news-block">
-      <span class="news-kicker">Was trägt</span>
-      <h2>Der belastbare Kern</h2>
-      <p>Den wichtigsten belegten Befund dieses Ressorts mit konkretem Nachweis einsetzen.</p>
+      <span class="news-kicker">In Klartext</span>
+      <h2>Was das Ergebnis konkret bedeutet</h2>
+      <p>Den wichtigsten Befund dieses Artikels erklären, statt den Prüfprozess nachzuerzählen.</p>
     </section>
     <aside class="news-card">
-      <span class="news-kicker">Der Schlüsselbund</span>
-      <h2>Was jetzt zählt</h2>
+      <span class="news-kicker">Auf einen Blick</span>
+      <h2>Die entscheidenden Punkte</h2>
       <ol class="news-list">
-        <li>Konkrete Maßnahme mit Verantwortlichem ergänzen.</li>
-        <li>Prüfbaren Abschlussnachweis benennen.</li>
+        <li>Erste konkrete Aussage aus der finalen Synthese einsetzen.</li>
+        <li>Zweite konkrete Aussage samt Auswirkung einsetzen.</li>
       </ol>
     </aside>
     <blockquote class="news-pullquote">
-      <span>Eine kurze, belegte Aussage aus dem Council-Ergebnis einsetzen.</span>
+      <span>Eine kurze, prägnante Kernaussage des Ergebnisses einsetzen.</span>
     </blockquote>
   </article>
-</page>`,
-    )
+</page>`;
+    })
     .join("\n\n");
 
   return `<newspaper>
 <front>
   <article class="news-layout news-layout--lead">
     <header class="news-hero">
-      <span class="news-kicker">Der Prüfplan</span>
-      <h1 class="news-hero__headline">${safeName}: Was die Prüfung <em>jetzt</em> verlangt</h1>
-      <p class="news-hero__deck">Entscheidung, Gegenpositionen und nächste Schritte — ruhig geordnet, vollständig belegt.</p>
-      <a class="news-pass" href="__RESULT_BASE__/synthese">
+      <span class="news-kicker">Das Ergebnis</span>
+      <h1 class="news-hero__headline">${safeName}: Das Wichtigste <em>zuerst</em></h1>
+      <p class="news-hero__deck">Urteil, wichtigste Gründe, Risiken und nächste Schritte — verständlich erklärt und nachvollziehbar belegt.</p>
+      <a class="news-pass" href="__RESULT_BASE__/urteil">
         <span class="news-pass__clip" aria-hidden="true"></span>
         <span class="news-pass__eyebrow">Prüfzugang</span>
-        <strong>Zur Entscheidung</strong>
-        <small>QA Council · Nachweis inklusive</small>
+        <strong>Zum Urteil</strong>
+        <small>Ergebnis · kompakt erklärt</small>
       </a>
     </header>
     <figure class="news-wide news-feature">
@@ -241,18 +278,18 @@ function newspaperHtml(documentName: string, pages: NewspaperPageTemplate[]) {
     </figure>
     <section class="news-layout news-layout--split">
       <article class="news-block news-block--lead">
-        <span class="news-kicker">Im Entscheidungsraum</span>
-        <h2>Die wichtigste Entscheidung gehört hierher</h2>
-        <p class="news-summary">Finale Synthese verdichten: Entscheidung, Begründung und verbleibendes Risiko.</p>
+        <span class="news-kicker">Die Hauptnachricht</span>
+        <h2>Das Gesamturteil gehört hierher</h2>
+        <p class="news-summary">Das Ergebnis in wenigen klaren Sätzen verdichten: Urteil, Begründung und wichtigste Konsequenz.</p>
       </article>
       <aside class="news-card news-priority">
-        <span class="news-kicker">Der nächste Schlüssel</span>
-        <strong>Die dringendste belegte Maßnahme einsetzen</strong>
-        <p>Owner, Frist und Abnahmekriterium konkret benennen.</p>
+        <span class="news-kicker">Was jetzt zählt</span>
+        <strong>Die wichtigste nächste Maßnahme einsetzen</strong>
+        <p>Verantwortlichkeit und Abnahmekriterium aus der Synthese verständlich benennen.</p>
       </aside>
     </section>
     <blockquote class="news-pullquote news-wide">
-      <span>Die Prüfung bleibt ruhig. Der Nachweis spricht.</span>
+      <span>Ein gutes Ergebnis erklärt nicht den Prozess — es erklärt die Entscheidung.</span>
     </blockquote>
     <nav class="news-teaser-grid" aria-label="Ressorts">
       ${pages
@@ -261,7 +298,7 @@ function newspaperHtml(documentName: string, pages: NewspaperPageTemplate[]) {
           (page, index) => `<a class="news-teaser" href="__RESULT_BASE__/${escapeHtml(page.slug)}">
         <span class="news-teaser__number">${String(index + 1).padStart(2, "0")}</span>
         <span class="news-kicker">${escapeHtml(page.title)}</span>
-        <strong>Die stärkste Aussage dieses Ressorts einsetzen</strong>
+        <strong>Die stärkste Aussage dieses Ergebnisartikels einsetzen</strong>
       </a>`,
         )
         .join("\n      ")}
@@ -576,6 +613,10 @@ const NEWSPAPER_CSS = `:root {
   min-width: 0;
 }
 
+.news-block--lead {
+  min-width: 0;
+}
+
 .news-block h1,
 .news-block h2,
 .news-card h2 {
@@ -799,20 +840,20 @@ function visualReportHtml(documentName: string) {
       <span class="visual-online" aria-label="Bericht ist verfügbar">•</span>
     </div>
     <div class="visual-message visual-message--coral">
-      <strong>council</strong>
-      <p>Synthese, Fachreviews und Gegenpositionen sind für diese Entscheidungsansicht zusammengeführt.</p>
+      <strong>kurzfassung</strong>
+      <p>Das Gesamturteil und seine wichtigste Begründung in zwei klaren Sätzen einsetzen.</p>
     </div>
     <div class="visual-message visual-message--teal">
-      <strong>nachweis</strong>
-      <p>Jede Aussage bleibt mit ihrem Beleg und ihrer offenen Unsicherheit verbunden.</p>
+      <strong>einordnung</strong>
+      <p>Die wichtigste Bedingung oder Unsicherheit des Ergebnisses verständlich ergänzen.</p>
     </div>
     <div class="visual-headline">
-      <span class="onepaper-kicker">Die große Nachricht</span>
+      <span class="onepaper-kicker">Das Ergebnis auf einen Blick</span>
       <strong><span>${escapeHtml(documentName)}</span></strong>
-      <p>Ein disziplinierter Gesprächsfaden aus Entscheidung, Risiko, Gegenposition und nächsten Schritten.</p>
+      <p>Urteil, Begründung, Risiken und nächste Schritte — visuell geordnet, ohne den internen Prüfprozess nachzuerzählen.</p>
     </div>
     <a class="visual-composer" href="#next-steps">
-      <span>Direkt zu den nächsten Schritten</span>
+      <span>Was ist jetzt zu tun?</span>
       <strong class="visual-send" aria-hidden="true">→</strong>
     </a>
   </header>
@@ -820,80 +861,85 @@ function visualReportHtml(documentName: string) {
   <main class="onepaper-content">
     <section id="decision" class="visual-section visual-grid visual-grid--wide">
       <article class="onepaper-decision visual-panel visual-panel--dark">
-        <span class="onepaper-kicker">council · Entscheidung</span>
-        <h1>Die finale Council-Entscheidung prägnant einsetzen</h1>
-        <p>Begründung, Bedingungen und verbleibendes Restrisiko in drei Sätzen verdichten.</p>
+        <span class="onepaper-kicker">Das Urteil</span>
+        <h1>Die finale Entscheidung prägnant einsetzen</h1>
+        <p>Reichweite, Begründung und verbleibende Bedingung in höchstens drei gut lesbaren Absätzen erklären.</p>
       </article>
       <figure class="visual-image visual-image--dark">
         {{EDITORIAL_IMAGE}}
-        <figcaption class="visual-caption">das Schlüsselmotiv zum geprüften Dokument</figcaption>
+        <figcaption class="visual-caption">Das Schlüsselmotiv zum Ergebnis.</figcaption>
       </figure>
     </section>
 
     <section class="visual-section">
-      <span class="visual-spark" aria-hidden="true">✦</span>
-      <h2>Was der Thread zur Risikolage sagt</h2>
-      <div class="visual-grid visual-emote-grid">
-        <article class="visual-metric">
-          <strong class="visual-metric__value">–</strong>
-          <span class="visual-metric__label">belegte Blocker</span>
+      <span class="onepaper-kicker">Warum dieses Urteil?</span>
+      <h2>Die drei entscheidenden Gründe</h2>
+      <div class="visual-thread">
+        <article class="visual-message visual-message--coral">
+          <strong>01 · stärkster Befund</strong>
+          <p>Den wichtigsten tragenden Grund mit seiner konkreten Auswirkung erklären.</p>
         </article>
-        <article class="visual-metric">
-          <strong class="visual-metric__value">–</strong>
-          <span class="visual-metric__label">kritische Auflagen</span>
+        <article class="visual-message visual-message--teal">
+          <strong>02 · zweite Perspektive</strong>
+          <p>Den zweiten entscheidenden Grund verständlich und ohne interne Rollenbezeichnungen erklären.</p>
         </article>
-        <article class="visual-metric">
-          <strong class="visual-metric__value">–</strong>
-          <span class="visual-metric__label">offene Nachweise</span>
+        <article class="visual-message visual-message--coral">
+          <strong>03 · Konsequenz</strong>
+          <p>Erklären, was diese Befunde gemeinsam für die Entscheidung bedeuten.</p>
         </article>
       </div>
-      <div class="visual-chart" aria-label="Belegte Risikoverteilung">
-        <label><span>Produktqualität</span><meter class="visual-chart__row" min="0" max="5" value="0">Nicht bewertet</meter></label>
-        <label><span>Betriebsrisiko</span><meter class="visual-chart__row" min="0" max="5" value="0">Nicht bewertet</meter></label>
-        <label><span>Nachweisreife</span><meter class="visual-chart__row" min="0" max="5" value="0">Nicht bewertet</meter></label>
+    </section>
+
+    <section class="visual-section visual-evidence">
+      <span class="onepaper-kicker">Risiken und Lücken</span>
+      <h2>Was noch nicht trägt</h2>
+      <div class="visual-matrix">
+        <article class="visual-matrix__item"><strong><span aria-hidden="true">01</span> Hohe Wirkung</strong><span>Die wichtigste offene Lücke und ihre konkrete Folge einsetzen.</span></article>
+        <article class="visual-matrix__item"><strong><span aria-hidden="true">02</span> Entscheidungskritisch</strong><span>Die Bedingung einsetzen, die vor einer belastbaren Entscheidung erfüllt sein muss.</span></article>
+        <article class="visual-matrix__item"><strong><span aria-hidden="true">03</span> Restunsicherheit</strong><span>Die Unsicherheit einsetzen, die trotz Maßnahmen sichtbar bleiben muss.</span></article>
       </div>
     </section>
 
     <section id="next-steps" class="visual-section visual-grid visual-grid--wide">
       <article class="visual-panel">
-        <span class="onepaper-kicker">die crew · Nächste Schritte</span>
+        <span class="onepaper-kicker">Was jetzt zu tun ist</span>
         <ol class="onepaper-actions visual-timeline">
           <li class="visual-timeline__step"><strong>01</strong><span>Dringendste Maßnahme mit Owner, Frist und Abnahmekriterium.</span></li>
           <li class="visual-timeline__step"><strong>02</strong><span>Zweiten priorisierten Schritt und dessen Nachweis ergänzen.</span></li>
-          <li class="visual-timeline__step"><strong>03</strong><span>Entscheidungspunkt für den nächsten Council-Termin nennen.</span></li>
+          <li class="visual-timeline__step"><strong>03</strong><span>Den nächsten fachlichen Entscheidungspunkt und seine Voraussetzung nennen.</span></li>
         </ol>
       </article>
       <aside class="visual-callout">
-        <span class="onepaper-kicker">gegenstimme</span>
-        <h2>Das stärkste Gegenargument sichtbar machen</h2>
-        <p>Warum es nicht vollständig überzeugt und welche Unsicherheit dennoch bleibt.</p>
+        <span class="onepaper-kicker">Was offen bleibt</span>
+        <h2>Die wichtigste Einschränkung sichtbar machen</h2>
+        <p>Beschreiben, welche Information oder welcher Nachweis das Urteil noch verändern könnte.</p>
       </aside>
     </section>
 
     <section class="visual-section visual-evidence">
-      <span class="onepaper-kicker">nachweis · angeheftet</span>
-      <h2>Die drei belastbarsten Belege</h2>
+      <span class="onepaper-kicker">Warum das Ergebnis trägt</span>
+      <h2>Die wichtigsten Begründungen</h2>
       <div class="visual-matrix">
-        <article class="visual-matrix__item"><strong><span aria-hidden="true">✦</span> Beleg 01</strong><span>Fundstelle und Aussage ergänzen.</span></article>
-        <article class="visual-matrix__item"><strong><span aria-hidden="true">↗</span> Beleg 02</strong><span>Fundstelle und Aussage ergänzen.</span></article>
-        <article class="visual-matrix__item"><strong><span aria-hidden="true">●</span> Beleg 03</strong><span>Fundstelle und Aussage ergänzen.</span></article>
+        <article class="visual-matrix__item"><strong><span aria-hidden="true">✦</span> Begründung 01</strong><span>Fundstelle, Aussage und Bedeutung ergänzen.</span></article>
+        <article class="visual-matrix__item"><strong><span aria-hidden="true">↗</span> Begründung 02</strong><span>Fundstelle, Aussage und Bedeutung ergänzen.</span></article>
+        <article class="visual-matrix__item"><strong><span aria-hidden="true">●</span> Begründung 03</strong><span>Fundstelle, Aussage und Bedeutung ergänzen.</span></article>
       </div>
     </section>
 
     <section class="visual-section visual-grid visual-grid--wide visual-image-thread">
       <figure class="visual-image">
         {{REPORT_IMAGE_EVIDENCE}}
-        <figcaption class="visual-caption">die Evidenzkarte aus den stärksten Fachreview-Nachweisen</figcaption>
+        <figcaption class="visual-caption">Die stärksten Begründungen des Ergebnisses.</figcaption>
       </figure>
       <figure class="visual-image">
         {{REPORT_IMAGE_ROADMAP}}
-        <figcaption class="visual-caption">die Umsetzungsroute für die priorisierten nächsten Schritte</figcaption>
+        <figcaption class="visual-caption">Die priorisierte Route zu einer belastbaren Entscheidung.</figcaption>
       </figure>
     </section>
   </main>
 
   <footer class="onepaper-footer">
-    <span>Der vollständige Council-Nachweis bleibt die Faktenquelle.</span>
+    <span>Das finale Ergebnis bleibt die Faktenquelle.</span>
     <b>QA Council <span aria-hidden="true">♡</span></b>
   </footer>
 </section>
@@ -921,7 +967,13 @@ const VISUAL_REPORT_CSS = `:root {
   font-size: 16px;
   line-height: 1.65;
   margin: 0 auto;
-  max-width: 1180px;
+  max-width: 1040px;
+  min-width: 0;
+}
+
+.onepaper-title,
+.onepaper-decision,
+.onepaper-actions {
   min-width: 0;
 }
 
@@ -961,7 +1013,7 @@ const VISUAL_REPORT_CSS = `:root {
   display: grid;
   gap: 1.25rem;
   min-height: 0;
-  padding: clamp(1.5rem, 5vw, 4.5rem) clamp(1.25rem, 7vw, 6.5rem) clamp(4rem, 9vw, 8rem);
+  padding: clamp(1.5rem, 5vw, 4rem) clamp(1.25rem, 7vw, 5rem) clamp(3.5rem, 7vw, 6rem);
   border: 0;
   background:
     radial-gradient(circle at 92% 5%, rgba(255, 185, 56, 0.22), transparent 20rem),
@@ -1056,19 +1108,25 @@ const VISUAL_REPORT_CSS = `:root {
 .visual-headline > strong {
   min-width: 0;
   color: var(--visual-plum);
-  font-size: clamp(3rem, 8vw, 7.2rem);
+  font-size: clamp(2.8rem, 7vw, 5.4rem);
   font-weight: 800;
-  letter-spacing: -0.065em;
-  line-height: 0.9;
-  overflow-wrap: anywhere;
+  letter-spacing: -0.055em;
+  line-height: 0.96;
+  overflow-wrap: break-word;
 }
 
 .visual-headline > strong span {
+  text-decoration: none;
+}
+
+.visual-headline > strong em {
+  color: inherit;
+  font-style: normal;
   text-decoration: underline;
   text-decoration-color: var(--visual-coral);
   text-decoration-style: wavy;
-  text-decoration-thickness: 0.08em;
-  text-underline-offset: 0.13em;
+  text-decoration-thickness: 0.055em;
+  text-underline-offset: 0.16em;
 }
 
 .visual-headline > p {
@@ -1124,7 +1182,7 @@ const VISUAL_REPORT_CSS = `:root {
 .onepaper-content {
   display: grid;
   gap: 0;
-  padding: 0 clamp(1.25rem, 7vw, 6.5rem);
+  padding: 0 clamp(1.25rem, 7vw, 5rem);
   overflow: visible;
 }
 
@@ -1138,13 +1196,14 @@ const VISUAL_REPORT_CSS = `:root {
 }
 
 .visual-section > h2 {
-  max-width: 18ch;
+  max-width: 24ch;
   margin: 0 0 2rem;
   color: var(--visual-plum);
-  font-size: clamp(2.2rem, 5vw, 4.8rem);
+  font-size: clamp(2rem, 4.5vw, 3.8rem);
   font-weight: 800;
-  letter-spacing: -0.055em;
-  line-height: 0.98;
+  letter-spacing: -0.045em;
+  line-height: 1.02;
+  overflow-wrap: break-word;
 }
 
 .visual-grid {
@@ -1153,18 +1212,50 @@ const VISUAL_REPORT_CSS = `:root {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.visual-grid--wide { grid-template-columns: minmax(0, 1.55fr) minmax(16rem, 0.8fr); }
+.visual-grid--wide { grid-template-columns: minmax(0, 1.35fr) minmax(18rem, 0.8fr); }
+
+.onepaper-grid,
+.visual-emote-grid {
+  display: grid;
+  gap: clamp(1rem, 2.5vw, 2rem);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.onepaper-grid--asymmetric {
+  grid-template-columns: minmax(0, 1.35fr) minmax(16rem, 0.8fr);
+}
+
+.visual-thread {
+  display: grid;
+  gap: 1rem;
+}
+
+.visual-thread .visual-message {
+  width: min(42rem, 88%);
+}
 
 .visual-panel,
-.visual-callout {
+.visual-callout,
+.onepaper-panel,
+.onepaper-priority {
   border: 0;
   border-radius: 1.5rem;
   padding: clamp(1.2rem, 3vw, 2.2rem);
   box-shadow: 0 1rem 2.5rem var(--visual-shadow);
 }
 
-.visual-panel {
+.visual-panel,
+.onepaper-panel {
   background: rgba(244, 113, 95, 0.13);
+}
+
+.onepaper-priority {
+  background: rgba(43, 163, 148, 0.17);
+}
+
+.onepaper-meta {
+  color: var(--visual-muted);
+  font-size: 0.8rem;
 }
 
 .visual-panel--dark {
@@ -1177,10 +1268,11 @@ const VISUAL_REPORT_CSS = `:root {
 .visual-panel h1 {
   margin: 1rem 0;
   color: var(--visual-plum);
-  font-size: clamp(2rem, 4.5vw, 4.4rem);
+  font-size: clamp(2rem, 4vw, 3.4rem);
   font-weight: 800;
-  letter-spacing: -0.055em;
-  line-height: 0.96;
+  letter-spacing: -0.045em;
+  line-height: 1.02;
+  overflow-wrap: break-word;
 }
 
 .visual-callout {
@@ -1207,7 +1299,7 @@ const VISUAL_REPORT_CSS = `:root {
   display: flex;
   flex-direction: column;
   margin: 0;
-  min-height: 18rem;
+  min-height: 14rem;
   padding: 0.65rem;
   border-radius: 1.6rem;
   background: var(--visual-oat);
@@ -1222,7 +1314,7 @@ const VISUAL_REPORT_CSS = `:root {
 .visual-image img,
 .visual-image .editorial-image {
   width: 100%;
-  min-height: 17rem;
+  min-height: 13rem;
   flex: 1;
   border: 0;
   border-radius: 1.15rem;
@@ -1231,13 +1323,13 @@ const VISUAL_REPORT_CSS = `:root {
 }
 
 .visual-caption {
-  max-width: calc(100% - 2rem);
+  max-width: 100%;
   align-self: flex-start;
   position: relative;
   z-index: 1;
-  margin: -1.35rem 0 0 1rem;
-  padding: 0.65rem 0.9rem;
-  border-radius: 1rem 1rem 1rem 0.3rem;
+  margin: 0.65rem 0 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.75rem;
   background: var(--visual-oat);
   color: var(--visual-plum);
   font-size: 0.72rem;
@@ -1343,6 +1435,25 @@ const VISUAL_REPORT_CSS = `:root {
   font-size: 0.9rem;
 }
 
+.visual-flow {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.visual-flow__step {
+  min-width: 0;
+  padding: 1.25rem;
+  border-radius: 1.25rem;
+  background: rgba(43, 163, 148, 0.14);
+  box-shadow: 0 0.8rem 1.8rem var(--visual-shadow);
+}
+
+.visual-spark {
+  display: inline;
+  color: var(--visual-marigold);
+}
+
 .visual-evidence {
   padding-inline: clamp(1.25rem, 4vw, 3.5rem);
   border: 0;
@@ -1358,7 +1469,7 @@ const VISUAL_REPORT_CSS = `:root {
 }
 
 .visual-matrix__item {
-  min-height: 11rem;
+  min-height: 9rem;
   display: grid;
   align-content: space-between;
   gap: 1rem;
@@ -1399,17 +1510,8 @@ const VISUAL_REPORT_CSS = `:root {
   line-height: 1.45;
 }
 
-.visual-spark {
-  position: absolute;
-  top: 3rem;
-  right: 3%;
-  color: var(--visual-marigold);
-  font-size: 1.6rem;
-  transform: rotate(12deg);
-}
-
 .visual-image-thread .visual-image:nth-child(2) {
-  margin-top: 3rem;
+  margin-top: 0;
 }
 
 .onepaper-footer {
@@ -1442,17 +1544,31 @@ const VISUAL_REPORT_CSS = `:root {
   to { opacity: 1; transform: translateY(0); }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .visual-grid,
   .visual-grid--wide,
-  .visual-matrix { grid-template-columns: minmax(0, 1fr); }
+  .visual-matrix,
+  .onepaper-grid,
+  .onepaper-grid--asymmetric,
+  .visual-emote-grid,
+  .visual-flow { grid-template-columns: minmax(0, 1fr); }
   .visual-hero { padding-inline: 1.25rem; }
   .visual-message { width: min(34rem, 88%); }
-  .visual-headline > strong { font-size: clamp(2.65rem, 12vw, 4.5rem); }
+  .visual-headline > strong { font-size: clamp(2.5rem, 10vw, 4rem); }
   .visual-chart label { grid-template-columns: minmax(0, 1fr); gap: 0.35rem; }
   .visual-image { min-height: 15rem; }
   .visual-image-thread .visual-image:nth-child(2) { margin-top: 0; }
   .onepaper-footer { align-items: flex-start; flex-direction: column; }
+}
+
+@media (max-width: 520px) {
+  .visual-chat-header { grid-template-columns: 2.75rem 1fr; }
+  .visual-online { grid-column: 2; font-size: 1.4rem; }
+  .visual-message,
+  .visual-thread .visual-message { width: 96%; }
+  .visual-message--teal { justify-self: end; }
+  .visual-timeline__step { grid-template-columns: 2.6rem minmax(0, 1fr); }
+  .visual-timeline__step strong { width: 2.5rem; height: 2.5rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1856,6 +1972,35 @@ function validateHtmlSafety(source: string, label: string) {
     "Das stärkste Gegenargument sichtbar machen",
     "Fundstelle und Aussage ergänzen.",
     "Nicht bewertet",
+    "Das Gesamturteil und seine wichtigste Begründung in zwei klaren Sätzen einsetzen.",
+    "Die wichtigste Bedingung oder Unsicherheit des Ergebnisses verständlich ergänzen.",
+    "Die finale Entscheidung prägnant einsetzen",
+    "Reichweite, Begründung und verbleibende Bedingung in höchstens drei gut lesbaren Absätzen erklären.",
+    "Den wichtigsten tragenden Grund mit seiner konkreten Auswirkung erklären.",
+    "Den zweiten entscheidenden Grund verständlich und ohne interne Rollenbezeichnungen erklären.",
+    "Erklären, was diese Befunde gemeinsam für die Entscheidung bedeuten.",
+    "Die wichtigste offene Lücke und ihre konkrete Folge einsetzen.",
+    "Die Bedingung einsetzen, die vor einer belastbaren Entscheidung erfüllt sein muss.",
+    "Die Unsicherheit einsetzen, die trotz Maßnahmen sichtbar bleiben muss.",
+    "Dringendste Maßnahme mit Owner, Frist und Abnahmekriterium.",
+    "Zweiten priorisierten Schritt und dessen Nachweis ergänzen.",
+    "Den nächsten fachlichen Entscheidungspunkt und seine Voraussetzung nennen.",
+    "Die wichtigste verbleibende Unsicherheit transparent erklären.",
+    "Fundstelle, Aussage und Bedeutung ergänzen.",
+    "Das stärkste Ergebnis in einem Satz einsetzen.",
+    "Das Ergebnis in wenigen klaren Sätzen verdichten",
+    "Die wichtigste Konsequenz für die Leserin oder den Leser einsetzen.",
+    "Den fachlichen Teil des finalen Ergebnisses verständlich erklären.",
+    "Den wichtigsten Befund dieses Artikels erklären, statt den Prüfprozess nachzuerzählen.",
+    "Erste konkrete Aussage aus der finalen Synthese einsetzen.",
+    "Zweite konkrete Aussage samt Auswirkung einsetzen.",
+    "Eine kurze, prägnante Kernaussage des Ergebnisses einsetzen.",
+    "Das Gesamturteil gehört hierher",
+    "Die wichtigste nächste Maßnahme einsetzen",
+    "Verantwortlichkeit und Abnahmekriterium aus der Synthese verständlich benennen.",
+    "Die stärkste Aussage dieses Ergebnisartikels einsetzen",
+    "Die wichtigste Einschränkung sichtbar machen",
+    "Beschreiben, welche Information oder welcher Nachweis das Urteil noch verändern könnte.",
   ];
   for (const placeholder of templatePlaceholders) {
     if (source.includes(placeholder)) {
@@ -1977,6 +2122,23 @@ export function validateReportWorkspaceFiles(
     ...validateReportCss(files.newspaper.css, "Zeitung"),
     ...validateReportCss(files.visualReport.css, "Visual Report"),
   ];
+  for (const [label, html, css] of [
+    ["Zeitung", files.newspaper.html, files.newspaper.css],
+    ["Visual Report", files.visualReport.html, files.visualReport.css],
+  ] as const) {
+    const classes = new Set(
+      [...html.matchAll(/\bclass\s*=\s*["']([^"']+)["']/gi)].flatMap((match) =>
+        match[1].split(/\s+/).filter(Boolean),
+      ),
+    );
+    for (const className of classes) {
+      if (!css.includes(`.${className}`)) {
+        findings.push(
+          `HTML/CSS · ${label}: Klasse "${className}" ist im gesperrten System-CSS nicht gestaltet.`,
+        );
+      }
+    }
+  }
   const manifests: ReportWorkspaceValidation["manifests"] = {};
   for (const [kind, source] of [
     ["newspaper", files.newspaper.manifest],

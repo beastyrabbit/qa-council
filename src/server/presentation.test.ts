@@ -4,6 +4,7 @@ import {
   finalSynthesisMarkdown,
   markdownHtml,
   reportDesignerPrompt,
+  resultNewspaperSections,
   splitNewspaperSections,
 } from "./presentation.js";
 
@@ -11,9 +12,9 @@ describe("Markdown-Ausgabe", () => {
   it("reduziert die Resultatansicht auf die finale Synthese", () => {
     expect(
       finalSynthesisMarkdown(
-        "# Ergebnis\n\n## Finale Synthese\n\nEntscheidung.\n\n## Triage und RACI\n\nIntern.",
+        "# Ergebnis\n\n## Finale Synthese\n\nEntscheidung.\n\n## Begründung\n\nSie trägt.\n\n## Triage und RACI\n\nIntern.",
       ),
-    ).toBe("# Ergebnis\n\n## Finale Synthese\n\nEntscheidung.\n");
+    ).toBe("# Ergebnis\n\n## Finale Synthese\n\nEntscheidung.\n\n## Begründung\n\nSie trägt.\n");
   });
   it("formatiert Modelltext und entfernt aktive oder unsichere Inhalte", () => {
     const html = markdownHtml(
@@ -53,10 +54,12 @@ Kanonische Cross-Review-Sektion.`;
 const reportPackage = `<report-package>
   <image-brief>Editorial lock and checkout ledger, restrained ink illustration.</image-brief>
   <newspaper>
-    <front><article class="news-layout news-layout--lead"><h1>Die Freigabe bleibt bedingt</h1>{{EDITORIAL_IMAGE}}<a href="__RESULT_BASE__/synthese">Analyse</a></article></front>
-    <page title="Entscheidung" slug="synthese"><article class="news-layout news-layout--split"><h1>Auflage vor Start</h1><p>Freigabe nur mit Auflage.</p></article></page>
-    <page slug="triage" title="Verantwortung"><article class="news-layout news-layout--sidebar"><h1>Security führt</h1><p>Security ist verantwortlich.</p></article></page>
-    <page slug="cross-reviews" title="Cross-Reviews"><article class="news-layout news-layout--columns"><h1>Cross-Review</h1><p>Kanonische Sektion.</p></article></page>
+    <front><article class="news-layout news-layout--lead"><h1>Die Freigabe bleibt bedingt</h1>{{EDITORIAL_IMAGE}}<a href="__RESULT_BASE__/urteil">Analyse</a></article></front>
+    <page title="Das Urteil" slug="urteil"><article class="news-layout news-layout--split"><h1>Auflage vor Start</h1><p>Freigabe nur mit Auflage.</p></article></page>
+    <page slug="staerken" title="Was trägt"><article class="news-layout news-layout--sidebar"><h1>Die Grundlage trägt</h1><p>Der Kern ist belastbar.</p></article></page>
+    <page slug="risiken" title="Risiken und Lücken"><article class="news-layout news-layout--columns"><h1>Eine Lücke bleibt</h1><p>Der Nachweis fehlt.</p></article></page>
+    <page slug="massnahmen" title="Was jetzt zu tun ist"><article class="news-layout news-layout--split"><h1>Nachweis schließen</h1><p>Die Auflage ist konkret.</p></article></page>
+    <page slug="belege" title="Warum das Urteil trägt"><article class="news-layout news-layout--columns"><h1>Belegt entschieden</h1><p>Die Fundstellen tragen das Urteil.</p></article></page>
   </newspaper>
   <onepaper>
     <section class="onepaper-sheet visual-report"><header class="onepaper-title visual-hero"><strong>Decision Brief</strong></header>{{EDITORIAL_IMAGE}}<main class="onepaper-content"><div class="onepaper-decision">Freigabe nur mit Auflage.</div></main><footer class="onepaper-footer">QA Council</footer></section>
@@ -64,7 +67,7 @@ const reportPackage = `<report-package>
 </report-package>`;
 
 describe("Report-Designer-Ausgaben", () => {
-  it("behält alle Auditsektionen als getrennte Newspaper-Seiten", async () => {
+  it("behält den Auditparser separat, baut die Zeitung aber aus fünf Ergebnisartikeln", async () => {
     const auditMarkdown = `# Ergebnis
 
 ## Finale Synthese
@@ -85,7 +88,7 @@ Council.
 Dissens.
 ## Abdeckungsmanifest
 Nachweis.`;
-    const expectedSlugs = [
+    const auditSlugs = [
       "synthese",
       "triage",
       "fachreviews",
@@ -97,12 +100,18 @@ Nachweis.`;
       "nachweis",
     ];
 
-    const sections = splitNewspaperSections(auditMarkdown);
+    expect(splitNewspaperSections(auditMarkdown).map((section) => section.slug)).toEqual(
+      auditSlugs,
+    );
+    const sections = resultNewspaperSections(auditMarkdown);
+    const expectedSlugs = ["urteil", "staerken", "risiken", "massnahmen", "belege"];
     expect(sections.map((section) => section.slug)).toEqual(expectedSlugs);
+    expect(sections.every((section) => section.markdown.includes("Synthese."))).toBe(true);
+    expect(sections.every((section) => !section.markdown.includes("Triage."))).toBe(true);
     const completeReportPackage = `<report-package>
-      <image-brief>Audit sections</image-brief>
+      <image-brief>Das Ergebnis und seine Entscheidung</image-brief>
       <newspaper>
-        <front><article><h1>Audit</h1></article></front>
+        <front><article><h1>Das Ergebnis</h1></article></front>
         ${sections
           .map(
             (section) =>
@@ -110,7 +119,7 @@ Nachweis.`;
           )
           .join("\n")}
       </newspaper>
-      <onepaper><section><h1>Audit</h1></section></onepaper>
+      <onepaper><section><h1>Das Ergebnis</h1></section></onepaper>
     </report-package>`;
     const result = await createPresentation({
       kind: "newspaper",
@@ -129,9 +138,12 @@ Nachweis.`;
     });
 
     expect(prompt).toContain("<report-package>");
-    expect(prompt).toContain('slug="synthese"');
-    expect(prompt).toContain('slug="triage"');
-    expect(prompt.match(/slug="cross-reviews"/g)).toHaveLength(1);
+    expect(prompt).toContain('slug="urteil"');
+    expect(prompt).toContain('slug="staerken"');
+    expect(prompt).toContain('slug="risiken"');
+    expect(prompt).toContain('slug="massnahmen"');
+    expect(prompt).toContain('slug="belege"');
+    expect(prompt).not.toContain('slug="cross-reviews"');
     expect(prompt).not.toContain('slug="interne-uberschrift-der-synthese"');
     expect(prompt).toContain("Bildbriefing");
   });
@@ -145,8 +157,8 @@ Nachweis.`;
     });
 
     expect(result.html).toContain("Die Freigabe bleibt bedingt");
-    expect(result.html).toContain("__RESULT_BASE__/synthese");
-    expect(result.pages).toHaveLength(3);
+    expect(result.html).toContain("__RESULT_BASE__/urteil");
+    expect(result.pages).toHaveLength(5);
     expect(result.pages?.[0].html).toContain("Auflage vor Start");
     expect(result.html).not.toContain("{{EDITORIAL_IMAGE}}");
   });
@@ -155,14 +167,11 @@ Nachweis.`;
     const result = await createPresentation({
       kind: "newspaper",
       finalMarkdown,
-      reportPackage: reportPackage.replace(
-        'title="Entscheidung"',
-        'title="Entscheidung &amp; Freigabe"',
-      ),
+      reportPackage: reportPackage.replace('title="Das Urteil"', 'title="Urteil &amp; Freigabe"'),
       documentName: "checkout.md",
     });
 
-    expect(result.html).toContain("Entscheidung &amp; Freigabe");
+    expect(result.html).toContain("Urteil &amp; Freigabe");
     expect(result.html).not.toContain("&amp;amp;");
   });
 

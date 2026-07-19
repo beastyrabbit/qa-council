@@ -404,6 +404,7 @@ export interface RunPiStageOptions {
   images?: ImageContent[];
   signal?: AbortSignal;
   workspaceDir?: string;
+  workspaceEditableFiles?: string[];
   toolMode?: PiToolMode;
   outputTools?: OutputToolDefinition[];
   onEvent?: (event: { type: string; message: string; data?: unknown }) => void;
@@ -481,7 +482,9 @@ async function runPiStageAttempt(options: RunPiStageOptions): Promise<PiStageRes
   }
   const workspace =
     options.toolMode === "read-edit" && options.workspaceDir
-      ? await createWorkspaceReadEditTools(options.workspaceDir)
+      ? await createWorkspaceReadEditTools(options.workspaceDir, {
+          editableFiles: options.workspaceEditableFiles,
+        })
       : undefined;
   const capturedToolCalls: PiStageResult["toolCalls"] = [];
   const outputTools = (options.outputTools ?? []).map((definition) =>

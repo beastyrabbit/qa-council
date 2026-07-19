@@ -145,10 +145,14 @@ Dies ist kein Fehler. Auf der Vollseiten-Laufansicht steht die konkrete Ground-o
 - Nach einem Prozessneustart werden gequeue-te und unterbrochene Läufe über dieselbe zentrale Queue
   im aktuellen Attempt wieder eingeplant.
 - Jede Darstellung hat mit `/results/<presentation-id>` eine stabile, kopierbare URL. Der SPA-Fallback stellt sicher, dass diese URL auch nach einem direkten Reload funktioniert.
-- Zeitungsressorts sind echte Unterseiten unter `/results/<presentation-id>/<ressort-slug>` und können einzeln kopiert oder neu geladen werden.
+- Die fünf Zeitungsartikel `urteil`, `staerken`, `risiken`, `massnahmen` und `belege` sind echte
+  Unterseiten unter `/results/<presentation-id>/<artikel-slug>` und können einzeln kopiert oder
+  neu geladen werden. Sie erklären das Ergebnis; interne Council-Phasen bleiben im Audit.
 - Pro neuem Lauf erzeugt der Report-Designer Tageszeitung und Visual Report gemeinsam. Das dokumentbezogene Motiv kommt bei Codex nativ von OpenAI, bei einem bildfähigen OpenRouter-Modell nativ von OpenRouter und bei der AI Box beziehungsweise als OpenRouter-Fallback von ComfyUI. Es wird in beiden Ausgaben wiederverwendet.
 - Codex und visionfähige OpenRouter-Modelle erhalten genau einen Chromium-Screenshot-Review der fertigen HTML-Ausgabe. Die lokale AI Box wird davon bewusst ausgenommen.
-- Der Visual Report kann als mehrseitiges PDF geladen werden; seine HTML-Infografiken und Kapitel bleiben dabei erhalten.
+- Der Visual Report kann als mehrseitiges PDF geladen werden. Sein systemseitig gesperrtes,
+  responsives Layout vermeidet überlappende Inhaltsmodule; Ergebnisgrafiken und Kapitel bleiben
+  beim Export erhalten.
 
 ### AI Box meldet Verbindungsfehler
 

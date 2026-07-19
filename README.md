@@ -14,7 +14,9 @@ QA Council prüft hochgeladene Dokumente mit einem nachvollziehbaren Multi-Rolle
 - Triage/RACI, isolierte Rollenreviews, Cross-Reviews, Debatte und Synthese gemäß den kanonischen Quellen
 - persistentes Detailprotokoll ohne Speicherung versteckter Gedankengänge
 - interaktive Ablaufgrafik mit echten Parallelspuren und agentbezogenem Log per Klick
-- finales Markdown als kanonisches Ergebnis; danach eine sichtbare Report-Design-Modellstufe, die pro Lauf eine individuelle mehrseitige HTML-Tageszeitung und einen diagrammreichen Visual Report von Grund auf erzeugt
+- finales Markdown als kanonisches Audit-Ergebnis; die lesbare Textansicht zeigt zuverlässig die
+  vollständige finale Synthese, während eine sichtbare Report-Design-Modellstufe daraus eine
+  resultatorientierte Tageszeitung und einen kollisionssicheren Visual Report erzeugt
 - dokumentbezogene Illustration pro Lauf über OpenAI, ein bildfähiges OpenRouter-Modell oder ComfyUI; stabile Ergebnis-/Unterseiten-URLs und A4-PDF-Export
 - eigene Dokument- und Archivbereiche mit erneutem Prüfen, Archivieren aller abgeschlossenen Läufe und gezieltem Löschen fehlgeschlagener Läufe
 - eigener Testmodus für parallele, voneinander getrennte Vergleiche von Codex, OpenRouter und AI Box mit individueller Modellauswahl und durchsuchbaren Modelllisten

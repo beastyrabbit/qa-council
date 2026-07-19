@@ -45,7 +45,7 @@ import {
   resumeRunWithAnswer,
 } from "./orchestrator.js";
 import { createPresentationPdf } from "./pdf.js";
-import { markdownHtml } from "./presentation.js";
+import { createPresentation, finalSynthesisMarkdown, markdownHtml } from "./presentation.js";
 import { codexAuthStatus, getAuthStorage, listModels } from "./providers.js";
 import { normalizeAuthoredReportHtml } from "./report-workspace.js";
 import { EMBEDDING_DIMENSIONS, embeddingConfig, listAiBoxEmbeddingModels } from "./retrieval.js";
@@ -159,7 +159,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   app.get("/api/health", async () => ({
     ok: true,
-    version: "0.4.2",
+    version: "0.4.3",
     schemaVersion: SCHEMA_VERSION,
   }));
 
@@ -677,7 +677,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       resumePhase: row.resume_phase as string | null,
     });
     const result: RunDetails = {
-      run: runDto(runRow),
+      run: { ...runDto(runRow), hasResult: presentationRows.length > 0 },
       attempt: attemptDto(selectedAttemptRow),
       attempts: attemptRows.map(attemptDto),
       stages: stageRows.map((row) => {
@@ -1105,8 +1105,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const { id } = request.params as { id: string };
     const row = sqlite
       .prepare(
-        `SELECT id, run_id, attempt_no, kind, title, html, pages_json, created_at
-       FROM presentations WHERE id = ?`,
+        `SELECT p.id, p.run_id, p.attempt_no, p.kind, p.title, p.html, p.pages_json,
+                p.created_at, a.content AS source_content, d.name AS document_name
+         FROM presentations p
+         LEFT JOIN artifacts a ON a.id = p.source_artifact_id
+         LEFT JOIN runs r ON r.id = p.run_id
+         LEFT JOIN documents d ON d.id = r.document_id
+         WHERE p.id = ?`,
       )
       .get(id) as
       | {
@@ -1118,24 +1123,35 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           html: string;
           pages_json: string;
           created_at: string;
+          source_content: string | null;
+          document_name: string | null;
         }
       | undefined;
-    return row
-      ? {
-          id: row.id,
-          runId: row.run_id,
-          attemptNo: row.attempt_no,
-          originAttempt: row.attempt_no,
-          kind: row.kind,
-          title: row.title,
-          html: normalizeAuthoredReportHtml(hydratePresentationImages(row.html)),
-          pages: safeParse<PresentationRecord["pages"]>(row.pages_json, [])?.map((page) => ({
-            ...page,
-            html: normalizeAuthoredReportHtml(hydratePresentationImages(page.html)),
-          })),
-          createdAt: row.created_at,
-        }
-      : reply.code(404).send({ error: "Darstellung nicht gefunden." });
+    if (!row) return reply.code(404).send({ error: "Darstellung nicht gefunden." });
+    const storedHtml =
+      row.kind === "text" && row.source_content
+        ? (
+            await createPresentation({
+              kind: "text",
+              finalMarkdown: finalSynthesisMarkdown(row.source_content),
+              documentName: row.document_name ?? "Dokument",
+            })
+          ).html
+        : row.html;
+    return {
+      id: row.id,
+      runId: row.run_id,
+      attemptNo: row.attempt_no,
+      originAttempt: row.attempt_no,
+      kind: row.kind,
+      title: row.title,
+      html: normalizeAuthoredReportHtml(hydratePresentationImages(storedHtml)),
+      pages: safeParse<PresentationRecord["pages"]>(row.pages_json, [])?.map((page) => ({
+        ...page,
+        html: normalizeAuthoredReportHtml(hydratePresentationImages(page.html)),
+      })),
+      createdAt: row.created_at,
+    };
   });
 
   app.get("/api/presentations/:id/pdf", async (request, reply) => {

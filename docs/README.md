@@ -36,10 +36,12 @@ persistiert und per Dokument-Hash wiederverwendet. Die initiale Uploadgrenze bet
 
 ## Ergebnisse
 
-- **HTML / Nur Text:** vollständiges, bereinigtes HTML des finalen Markdown-Ergebnisses; das Markdown kann heruntergeladen werden.
-- **QA-Tageszeitung:** ruhige, warme „Velvet Green Room“-Titelseite plus eigenständige
-  Ressortseiten im flaschengrünen Papier-/Messing-Design.
+- **HTML / Nur Text:** vollständiges, bereinigtes HTML der finalen Synthese; das kanonische
+  Audit-Markdown kann weiterhin heruntergeladen werden.
+- **QA-Tageszeitung:** ruhige, warme „Velvet Green Room“-Titelseite plus fünf verständliche
+  Ergebnisartikel zu Urteil, Stärken, Risiken, Maßnahmen und Belegen.
 - **Visual Report:** warme „Group Chat“-Publikation mit belegten Gesprächsbubbles,
-  Prozessbildern, Matrizen, nächsten Schritten und PDF-Export.
+  Entscheidungsgründen, Risiken, nächsten Schritten und PDF-Export. Interne Council-Schritte
+  werden nicht als sichtbarer Inhalt nacherzählt.
 
 Weitere Darstellungen können nach einem abgeschlossenen Lauf erzeugt werden, ohne den Council erneut auszuführen.

@@ -45,7 +45,7 @@ function seed() {
 }
 
 describe("buildApp", () => {
-  it("liefert Health 0.4.2 und hält große Inhalte aus der Summary fern", async () => {
+  it("liefert Health 0.4.3 und hält große Inhalte aus der Summary fern", async () => {
     const db = seed();
     app = await buildApp({
       db,
@@ -53,10 +53,11 @@ describe("buildApp", () => {
       services: { enqueueRun: vi.fn(() => true) },
     });
     const health = await app.inject({ method: "GET", url: "/api/health" });
-    expect(health.json()).toEqual({ ok: true, version: "0.4.2", schemaVersion: 4 });
+    expect(health.json()).toEqual({ ok: true, version: "0.4.3", schemaVersion: 4 });
 
     const summary = await app.inject({ method: "GET", url: "/api/runs/run?attempt=1" });
     expect(summary.statusCode).toBe(200);
+    expect(summary.json().run.hasResult).toBe(true);
     expect(summary.body).not.toContain("# Geheim");
     expect(summary.body).not.toContain("<p>groß</p>");
 
@@ -67,6 +68,15 @@ describe("buildApp", () => {
     expect(file.statusCode).toBe(200);
     expect(file.json().content).toContain("# Geheim");
     expect(file.json().contentHtml).not.toContain("<script");
+
+    const presentation = await app.inject({
+      method: "GET",
+      url: "/api/presentations/presentation",
+    });
+    expect(presentation.statusCode).toBe(200);
+    expect(presentation.json().html).toContain("Geheim");
+    expect(presentation.json().html).not.toContain("<script");
+    expect(presentation.json().html).not.toContain("<p>groß</p>");
   });
 
   it("liefert kompatible lokale Embedding-Modelle über den Metadaten-Endpunkt", async () => {

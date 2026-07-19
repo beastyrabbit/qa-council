@@ -53,6 +53,7 @@ const REPORT_CLASSES = new Set([
   "visual-message",
   "visual-message--coral",
   "visual-message--teal",
+  "visual-thread",
   "visual-headline",
   "visual-composer",
   "visual-send",

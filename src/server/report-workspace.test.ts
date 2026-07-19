@@ -63,15 +63,15 @@ describe("persistenter Report-Arbeitsbereich", () => {
       runId: "run-42",
       documentName: "checkout.md",
       newspaperPages: [
-        { slug: "synthese", title: "Entscheidung" },
-        { slug: "nachweis", title: "Nachweis" },
+        { slug: "urteil", title: "Das Urteil" },
+        { slug: "belege", title: "Warum das Urteil trägt" },
       ],
     });
 
     expect(files.root).toBe(path.join(dataDir, "report-workspaces", "run-42"));
     expect(reportWorkspacePath("run-42")).toBe(files.root);
     expect(files.newspaper.html).toContain("<newspaper>");
-    expect(files.newspaper.html).toContain('slug="synthese"');
+    expect(files.newspaper.html).toContain('slug="urteil"');
     expect(files.newspaper.html).toContain('class="news-pass"');
     expect(files.newspaper.css).toContain(".news-hero__headline");
     expect(files.newspaper.css).toContain("--news-pine: #1f362c");
@@ -104,57 +104,116 @@ describe("persistenter Report-Arbeitsbereich", () => {
     await scaffoldReportWorkspace({
       runId: "assemble",
       documentName: "release.md",
-      newspaperPages: [{ slug: "synthese", title: "Entscheidung" }],
+      newspaperPages: [{ slug: "urteil", title: "Das Urteil" }],
     });
     const newspaperPath = path.join(reportWorkspacePath("assemble"), "newspaper", "index.html");
     const completedNewspaper = (await readFile(newspaperPath, "utf8"))
       .replace(
-        "Diesen Vorspann anhand des finalen Council-Ergebnisses präzisieren.",
-        "Die Freigabe bleibt bis zum belegten Nachweis offen.",
+        "Das Gesamturteil in Klartext erklären: Entscheidung, Reichweite, Bedingungen und verbleibende Unsicherheit.",
+        "Die Freigabe bleibt bis zum belegten Nachweis offen und ist klar begrenzt.",
       )
       .replace(
-        "Den wichtigsten belegten Befund dieses Ressorts mit konkretem Nachweis einsetzen.",
+        "Den wichtigsten Befund dieses Artikels erklären, statt den Prüfprozess nachzuerzählen.",
         "Der konkrete Nachweis fehlt im geprüften Dokument.",
       )
       .replace(
-        "Konkrete Maßnahme mit Verantwortlichem ergänzen.",
-        "Abnahmekriterien dokumentieren.",
+        "Erste konkrete Aussage aus der finalen Synthese einsetzen.",
+        "Die fachliche Grundlage ist grundsätzlich belastbar.",
       )
       .replace(
-        "Die wichtigste Entscheidung gehört hierher",
-        "Freigabe erst nach geschlossenem Nachweis",
+        "Zweite konkrete Aussage samt Auswirkung einsetzen.",
+        "Der fehlende Nachweis verhindert die uneingeschränkte Freigabe.",
       )
-      .replace("Die dringendste belegte Maßnahme einsetzen", "Fehlende Abnahmekriterien schließen")
       .replace(
-        "Die stärkste Aussage dieses Ressorts einsetzen",
+        "Eine kurze, prägnante Kernaussage des Ergebnisses einsetzen.",
+        "Der Nachweis entscheidet über die Freigabe",
+      )
+      .replace("Das Gesamturteil gehört hierher", "Freigabe erst nach geschlossenem Nachweis")
+      .replace(
+        "Das Ergebnis in wenigen klaren Sätzen verdichten: Urteil, Begründung und wichtigste Konsequenz.",
+        "Die Freigabe ist bedingt, weil ein entscheidender Nachweis fehlt.",
+      )
+      .replace("Die wichtigste nächste Maßnahme einsetzen", "Fehlende Abnahmekriterien schließen")
+      .replace(
+        "Verantwortlichkeit und Abnahmekriterium aus der Synthese verständlich benennen.",
+        "Das QA-Team dokumentiert die messbaren Abnahmekriterien.",
+      )
+      .replace(
+        "Die stärkste Aussage dieses Ergebnisartikels einsetzen",
         "Der Nachweis entscheidet über die Freigabe",
       );
     await writeFile(newspaperPath, completedNewspaper);
     const visualPath = path.join(reportWorkspacePath("assemble"), "visual-report", "index.html");
     const completedVisual = (await readFile(visualPath, "utf8"))
       .replace(
-        "Die finale Council-Entscheidung prägnant einsetzen",
+        "Das Gesamturteil und seine wichtigste Begründung in zwei klaren Sätzen einsetzen.",
+        "Die Freigabe bleibt bedingt, weil der entscheidende Nachweis fehlt.",
+      )
+      .replace(
+        "Die wichtigste Bedingung oder Unsicherheit des Ergebnisses verständlich ergänzen.",
+        "Messbare Abnahmekriterien müssen vor dem Start dokumentiert sein.",
+      )
+      .replace(
+        "Die finale Entscheidung prägnant einsetzen",
         "Freigabe erst nach geschlossenem Nachweis",
       )
       .replace(
-        "Begründung, Bedingungen und verbleibendes Restrisiko in drei Sätzen verdichten.",
+        "Reichweite, Begründung und verbleibende Bedingung in höchstens drei gut lesbaren Absätzen erklären.",
         "Die Freigabe bleibt an messbare Nachweise gebunden.",
+      )
+      .replace(
+        "Den wichtigsten tragenden Grund mit seiner konkreten Auswirkung erklären.",
+        "Die Grundstruktur ist belastbar und deckt die Kernfälle ab.",
+      )
+      .replace(
+        "Den zweiten entscheidenden Grund verständlich und ohne interne Rollenbezeichnungen erklären.",
+        "Die fehlende Nachweiskette begrenzt die Aussagekraft.",
+      )
+      .replace(
+        "Erklären, was diese Befunde gemeinsam für die Entscheidung bedeuten.",
+        "Eine bedingte Freigabe verbindet Fortschritt mit kontrolliertem Risiko.",
+      )
+      .replace(
+        "Die wichtigste offene Lücke und ihre konkrete Folge einsetzen.",
+        "Ohne Abnahmekriterien bleibt die Freigabe nicht reproduzierbar.",
+      )
+      .replace(
+        "Die Bedingung einsetzen, die vor einer belastbaren Entscheidung erfüllt sein muss.",
+        "Der Nachweis muss vor dem Produktionsstart geschlossen sein.",
+      )
+      .replace(
+        "Die Unsicherheit einsetzen, die trotz Maßnahmen sichtbar bleiben muss.",
+        "Die Wirksamkeit wird erst im nächsten Review vollständig sichtbar.",
       )
       .replace(
         "Dringendste Maßnahme mit Owner, Frist und Abnahmekriterium.",
         "Abnahmekriterien bis Freitag durch das QA-Team dokumentieren.",
       )
       .replace(
-        "Das stärkste Gegenargument sichtbar machen",
-        "Der frühe Markttermin bleibt ein relevantes Gegenargument",
+        "Zweiten priorisierten Schritt und dessen Nachweis ergänzen.",
+        "Nachweiskette im nächsten Review vollständig prüfen.",
       )
-      .replaceAll("Fundstelle und Aussage ergänzen.", "Review-Fundstelle mit Nachweis verknüpfen.")
-      .replaceAll("Nicht bewertet", "0 von 5");
+      .replace(
+        "Den nächsten fachlichen Entscheidungspunkt und seine Voraussetzung nennen.",
+        "Nach erfolgreicher Prüfung kann die finale Freigabe erfolgen.",
+      )
+      .replace(
+        "Die wichtigste Einschränkung sichtbar machen",
+        "Die Wirksamkeit ist noch nicht vollständig belegt",
+      )
+      .replace(
+        "Beschreiben, welche Information oder welcher Nachweis das Urteil noch verändern könnte.",
+        "Ein vollständiger Wirksamkeitsnachweis kann die bedingte in eine finale Freigabe ändern.",
+      )
+      .replaceAll(
+        "Fundstelle, Aussage und Bedeutung ergänzen.",
+        "Die dokumentierte Fundstelle stützt das jeweilige Teilurteil.",
+      );
     await writeFile(visualPath, completedVisual);
 
     const result = await assembleReportWorkspace({
       runId: "assemble",
-      expectedPageSlugs: ["synthese"],
+      expectedPageSlugs: ["urteil"],
     });
 
     expect(result.validation.valid).toBe(true);
@@ -162,7 +221,7 @@ describe("persistenter Report-Arbeitsbereich", () => {
     expect(result.reportPackage).toContain("<newspaper>");
     expect(result.reportPackage).toContain("<onepaper>");
     expect(result.reportPackage.match(/\{\{EDITORIAL_IMAGE\}\}/g)).toHaveLength(2);
-    expect(validateReportPackage(result.reportPackage, ["synthese"]).valid).toBe(true);
+    expect(validateReportPackage(result.reportPackage, ["urteil"]).valid).toBe(true);
     expect(result.styles.newspaper).toContain("--news-pine");
     expect(result.styles.visualReport).toContain("--visual-oat");
     expect(result.imageSlots).toHaveLength(4);

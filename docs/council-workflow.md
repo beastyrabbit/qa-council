@@ -112,8 +112,11 @@ Das kanonische Markdown besitzt getrennte Abschnitte:
 8. `## Dissent-Audit`
 9. `## Abdeckungsmanifest`
 
-Tageszeitung und Visual Report erhalten für diese Bereiche eigenständige Seiten. Die normale
-Resultatansicht zeigt nur die finale Synthese. Vollständige Einzelartefakte werden ausschließlich
+Diese Abschnitte bilden das unveränderte Audit, nicht die sichtbare Gliederung der Reports. Die
+normale Resultatansicht zeigt die vollständige finale Synthese. Die Tageszeitung verdichtet
+dieselbe Synthese auf einer Hauptseite und in fünf Ergebnisartikeln zu Urteil, Stärken, Risiken,
+Maßnahmen und Belegen. Der Visual Report erklärt Urteil, Gründe, Risiken, Handlungen, Belege und
+Restunsicherheit. Vollständige Einzelartefakte und interne Council-Schritte werden ausschließlich
 im Dateireader geöffnet.
 
 ## Laufvisualisierung

@@ -81,6 +81,32 @@ describe("sichere Workspace-Werkzeuge", () => {
     );
   });
 
+  it("lässt gesperrte Systemdateien lesen, aber nicht bearbeiten", async () => {
+    const { workspace } = await temporaryWorkspace();
+    await writeFile(path.join(workspace, "index.html"), "<main>Alt</main>", "utf8");
+    await writeFile(path.join(workspace, "styles.css"), ".root { color: red; }", "utf8");
+    const { tools } = await createWorkspaceReadEditTools(workspace, {
+      editableFiles: ["index.html"],
+    });
+    const read = tools.find((tool) => tool.name === "read");
+    const edit = tools.find((tool) => tool.name === "edit");
+    if (!read || !edit) throw new Error("Workspace-Werkzeuge fehlen.");
+
+    await expect(
+      read.execute("read-css", { path: "styles.css" }, undefined, undefined, undefined as never),
+    ).resolves.toBeDefined();
+    await expect(
+      edit.execute(
+        "edit-css",
+        { path: "styles.css", edits: [{ oldText: "red", newText: "blue" }] },
+        undefined,
+        undefined,
+        undefined as never,
+      ),
+    ).rejects.toThrow("schreibgeschützt");
+    expect(await readFile(path.join(workspace, "styles.css"), "utf8")).toContain("red");
+  });
+
   it("blockiert Symlinks, die aus dem Workspace herausführen", async () => {
     const { directory, workspace } = await temporaryWorkspace();
     const outside = path.join(directory, "secret.txt");

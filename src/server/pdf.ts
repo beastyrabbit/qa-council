@@ -25,6 +25,14 @@ const printCss = `
   }
 `;
 
+const screenshotCss = `
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+    caret-color: transparent !important;
+  }
+`;
+
 function escapeHtml(value: string) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
@@ -101,7 +109,12 @@ export async function createPresentationScreenshot(
   viewport: { width: number; height: number },
   signal?: AbortSignal,
 ) {
-  const { directory, inputPath } = await temporaryDocument(html, title, "qa-council-shot-");
+  const { directory, inputPath } = await temporaryDocument(
+    html,
+    title,
+    "qa-council-shot-",
+    screenshotCss,
+  );
   const outputPath = path.join(directory, "presentation.png");
   try {
     await execute(

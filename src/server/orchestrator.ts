@@ -10,7 +10,7 @@ import { createPresentationScreenshot } from "./pdf.js";
 import {
   createPresentation,
   finalSynthesisMarkdown,
-  splitNewspaperSections,
+  resultNewspaperSections,
 } from "./presentation.js";
 import {
   modelSupportsVision,
@@ -75,7 +75,7 @@ export const PHASE_VERSIONS: Record<PipelinePhase, number> = {
   "pro-contra-debate": 1,
   "council-rounds": 1,
   "synthesis-dissent": 2,
-  reports: 1,
+  reports: 2,
 };
 
 interface RunRow {
@@ -558,6 +558,7 @@ async function runStage(options: {
   skillHashes?: Record<string, string>;
   images?: ImageContent[];
   workspaceDir?: string;
+  workspaceEditableFiles?: string[];
   toolMode?: "read-edit" | "output-tools";
   outputTools?: Array<{ name: string; description: string; parameters: TSchema }>;
   signal?: AbortSignal;
@@ -633,6 +634,7 @@ async function runStage(options: {
           prompt: options.prompt,
           images: options.images,
           workspaceDir: options.workspaceDir,
+          workspaceEditableFiles: options.workspaceEditableFiles,
           toolMode: options.toolMode,
           outputTools: options.outputTools,
           signal,
@@ -2299,9 +2301,10 @@ ${context.manifest}
     }
     controller.signal.throwIfAborted();
 
+    const reportSourceMarkdown = finalSynthesisMarkdown(finalMarkdown);
     const textResult = await createPresentation({
       kind: "text",
-      finalMarkdown: finalSynthesisMarkdown(finalMarkdown),
+      finalMarkdown: reportSourceMarkdown,
       documentName: run.document_name,
     });
     const textPresentationId = persistPresentation({
@@ -2321,7 +2324,7 @@ ${context.manifest}
     });
 
     const designSkill = loadReportDesignSkill();
-    const newspaperSections = splitNewspaperSections(finalMarkdown);
+    const newspaperSections = resultNewspaperSections(reportSourceMarkdown);
     const expectedPageSlugs = newspaperSections.map((section) => section.slug);
     const workspace = await scaffoldReportWorkspace({
       runId,
@@ -2349,16 +2352,16 @@ ${context.manifest}
         branches: ["newspaper", "visual-report"],
       },
     );
-    const commonBuilderPrompt = `Das finale Council-Ergebnis ist die einzige Faktenquelle.
-Lies alle drei vorhandenen Template-Dateien im aktuellen Arbeitsverzeichnis und bearbeite
-index.html, styles.css und report.ts mit dem edit-Werkzeug. Nutze die Templates als belastbare
-Ausgangsbasis, aber ersetze jeden Platzhaltertext durch konkrete, belegte Inhalte. Erfinde keine
-Zahlen, Zitate, Owner oder Entscheidungen. report.ts bleibt ein reines Literalmanifest ohne
-ausführbaren Code. Gib am Ende nur eine kurze Zusammenfassung deiner tatsächlich vorgenommenen
-Dateiänderungen aus.
+    const commonBuilderPrompt = `Die finale Synthese ist die einzige Faktenquelle.
+Lies alle drei vorhandenen Template-Dateien im aktuellen Arbeitsverzeichnis. styles.css ist
+systemseitig gestaltet und schreibgeschützt. Bearbeite ausschließlich index.html und report.ts
+mit dem edit-Werkzeug und verwende nur die vorhandenen, stabil gestalteten CSS-Klassen. Ersetze
+jeden Platzhaltertext durch konkrete, belegte Inhalte. Erfinde keine Zahlen, Zitate, Owner oder
+Entscheidungen. report.ts bleibt ein reines Literalmanifest ohne ausführbaren Code. Gib am Ende
+nur eine kurze Zusammenfassung deiner tatsächlich vorgenommenen Dateiänderungen aus.
 
-    FINALES COUNCIL-ERGEBNIS:
-${finalMarkdown}`;
+    FINALES, FÜR LESER AUFBEREITETES ERGEBNIS:
+${reportSourceMarkdown}`;
     await settleParallel(
       [
         (groupSignal) =>
@@ -2366,9 +2369,11 @@ ${finalMarkdown}`;
             run,
             name: "Report-Build · Tageszeitung",
             prompt: `Gestalte eine ruhige, warme digitale QA-Publikation im verbindlichen
-„Velvet Green Room“-Stil des Skills mit eigenständigen Ressortseiten. Die Titelseite priorisiert;
-Unterseiten vertiefen und wiederholen nicht bloß. Bewahre die exakten Farbrollen, großzügigen
-Leerraum und den Prüfzugang als sachliche Navigation zur finalen Entscheidung.
+„Velvet Green Room“-Stil des Skills. Die prägnante Titelseite nennt Urteil, wichtigste Begründung
+und nächste Handlung. Genau fünf Artikel vertiefen das Ergebnis: Urteil, tragende Stärken,
+Risiken und Lücken, nächste Maßnahmen sowie die Beleggrundlage. Cross-Reviews, Rollen, Debatte,
+Council-Runden und andere interne Prozessschritte sind keine Zeitungsressorts und werden nicht
+als Artikel dargestellt. Bewahre die exakten Farbrollen und großzügigen Leerraum.
 
 ${commonBuilderPrompt}`,
             progress: 92,
@@ -2376,6 +2381,7 @@ ${commonBuilderPrompt}`,
             systemPrompt: reportDesignerSystemPrompt(true),
             skillHashes: { [REPORT_DESIGN_SKILL_FILE]: sha256(designSkill) },
             workspaceDir: workspace.newspaper.root,
+            workspaceEditableFiles: ["index.html", "report.ts"],
             toolMode: "read-edit",
             signal: groupSignal,
           }),
@@ -2383,12 +2389,13 @@ ${commonBuilderPrompt}`,
           runStage({
             run,
             name: "Report-Build · Visual Report",
-            prompt: `Gestalte einen langen, hochwertigen Visual Report im verbindlichen
-„Group Chat“-Stil des Skills. Nutze einen disziplinierten Gesprächsfaden mit großzügigen Bubbles,
-exakten Farbrollen und einem echten Composer-Link zu den nächsten Schritten. Verwende mindestens
-drei unterschiedliche, belegte HTML/CSS-Informationsformen und drei inhaltlich spezifische
-Bildbriefings im Manifest. Nutze Ablauf, Matrix, Timeline, Beziehungen oder Evidenzkarten;
-erfinde keine Fake-Metriken oder Absenderzitate.
+            prompt: `Gestalte einen ruhigen, hochwertigen Visual Report im verbindlichen
+„Group Chat“-Stil des Skills. Erkläre ausschließlich das Ergebnis: Urteil, entscheidende Gründe,
+Risiken, nächste Handlungen, Belege und verbleibende Unsicherheit. Nutze einen disziplinierten
+Gesprächsfaden mit großzügigen Bubbles, exakten Farbrollen und dem vorhandenen Composer-Link.
+Verwende nur die stabilen Layoutklassen des Templates und drei inhaltlich spezifische
+Bildbriefings im Manifest. Keine Prozesschronologie, Fake-Metriken, Absenderzitate, überlappenden
+Elemente, negativen Abstände oder absolut positionierten Inhaltsmodule.
 
 ${commonBuilderPrompt}`,
             progress: 92,
@@ -2396,6 +2403,7 @@ ${commonBuilderPrompt}`,
             systemPrompt: reportDesignerSystemPrompt(true),
             skillHashes: { [REPORT_DESIGN_SKILL_FILE]: sha256(designSkill) },
             workspaceDir: workspace.visualReport.root,
+            workspaceEditableFiles: ["index.html", "report.ts"],
             toolMode: "read-edit",
             signal: groupSignal,
           }),
@@ -2443,12 +2451,14 @@ ${commonBuilderPrompt}`,
               run,
               name: "Report-Fix · Tageszeitung",
               prompt: `Die statische Schlussprüfung meldet folgende Befunde:\n${staticFeedback}\n
-Lies die drei vorhandenen Dateien und korrigiere mit edit nur Befunde, die die Zeitung betreffen.
-Bewahre belegte Inhalte und alle Ressortseiten. Antworte nur mit einer kurzen Änderungsübersicht.`,
+Lies die drei vorhandenen Dateien und korrigiere mit edit nur index.html und report.ts, soweit
+die Befunde die Zeitung betreffen. styles.css bleibt unverändert. Bewahre belegte Inhalte und
+alle Ergebnisartikel. Antworte nur mit einer kurzen Änderungsübersicht.`,
               progress: 93,
               kind: "report-static-fix-newspaper",
               systemPrompt: reportDesignerSystemPrompt(true),
               workspaceDir: workspace.newspaper.root,
+              workspaceEditableFiles: ["index.html", "report.ts"],
               toolMode: "read-edit",
               signal: groupSignal,
             }),
@@ -2457,12 +2467,14 @@ Bewahre belegte Inhalte und alle Ressortseiten. Antworte nur mit einer kurzen Ä
               run,
               name: "Report-Fix · Visual Report",
               prompt: `Die statische Schlussprüfung meldet folgende Befunde:\n${staticFeedback}\n
-Lies die drei vorhandenen Dateien und korrigiere mit edit nur Befunde, die den Visual Report
-betreffen. Bewahre belegte Inhalte und Bild-Slots. Antworte nur mit einer Änderungsübersicht.`,
+Lies die drei vorhandenen Dateien und korrigiere mit edit nur index.html und report.ts, soweit
+die Befunde den Visual Report betreffen. styles.css bleibt unverändert. Bewahre belegte Inhalte
+und Bild-Slots. Antworte nur mit einer Änderungsübersicht.`,
               progress: 93,
               kind: "report-static-fix-visual",
               systemPrompt: reportDesignerSystemPrompt(true),
               workspaceDir: workspace.visualReport.root,
+              workspaceEditableFiles: ["index.html", "report.ts"],
               toolMode: "read-edit",
               signal: groupSignal,
             }),
@@ -2511,14 +2523,14 @@ betreffen. Bewahre belegte Inhalte und Bild-Slots. Antworte nur mit einer Änder
 
     const candidateNewspaper = await createPresentation({
       kind: "newspaper",
-      finalMarkdown,
+      finalMarkdown: reportSourceMarkdown,
       reportPackage: reportAssembly.reportPackage,
       reportCss: scopeReportCss(reportAssembly.styles.newspaper, ".result--newspaper"),
       documentName: run.document_name,
     });
     const candidateVisual = await createPresentation({
       kind: "onepaper",
-      finalMarkdown,
+      finalMarkdown: reportSourceMarkdown,
       reportPackage: reportAssembly.reportPackage,
       reportCss: scopeReportCss(reportAssembly.styles.visualReport, ".result--onepaper"),
       documentName: run.document_name,
@@ -2575,9 +2587,10 @@ ${reportAssembly.snapshot}`,
             run,
             name: "Report-Review · visuelles Design",
             prompt: `Prüfe Zeitung und Visual Report auf Hierarchie, Dichte, Rhythmus, Kontrast,
-Overflow, Bildräume, mobile Priorisierung und Printwirkung. Die Zeitung soll laut und
-redaktionell sein; der Visual Report informationsgrafisch und abwechslungsreich. Nenne konkrete
-Dateiänderungen, keine vollständige Neufassung.
+Overflow, Bildräume, mobile Priorisierung und Printwirkung. Die Zeitung soll ruhig, prägnant und
+redaktionell sein; der Visual Report klar, abwechslungsreich und kollisionsfrei. styles.css ist
+gesperrt: Nenne nur konkrete Änderungen an index.html oder report.ts, keine vollständige
+Neufassung und keine neuen CSS-Klassen.
 
 WORKSPACE:
 ${reportAssembly.snapshot}`,
@@ -2596,7 +2609,7 @@ Suche erfundene Fakten, fehlende kritische Befunde, verschluckten Dissens, falsc
 unklare Belege. Nenne pro Finding Ziel-Datei, Evidenz und präzise Änderung; schreibe nichts neu.
 
 FINALES ERGEBNIS:
-${finalMarkdown}
+  ${reportSourceMarkdown}
 
 WORKSPACE:
 ${reportAssembly.snapshot}`,
@@ -2632,14 +2645,16 @@ ${reportAssembly.snapshot}`,
             run,
             name: "Report-Final-Patch · Tageszeitung",
             prompt: `Lies die drei bestehenden Dateien. Setze mit edit ausschließlich relevante
-Findings für die Tageszeitung um. Bewahre gute Gestaltung und belegte Aussagen; keine
-Komplett-Neuschreibung und keine neuen Dateien.
+Findings in index.html und report.ts für die Tageszeitung um. styles.css bleibt unverändert.
+Bewahre gute Gestaltung und belegte Aussagen; keine Komplett-Neuschreibung, keine neuen
+CSS-Klassen und keine neuen Dateien.
 
 ${consolidatedFindings}`,
             progress: 96,
             kind: "report-final-patch-newspaper",
             systemPrompt: reportDesignerSystemPrompt(true),
             workspaceDir: workspace.newspaper.root,
+            workspaceEditableFiles: ["index.html", "report.ts"],
             toolMode: "read-edit",
             signal: groupSignal,
           }),
@@ -2648,14 +2663,16 @@ ${consolidatedFindings}`,
             run,
             name: "Report-Final-Patch · Visual Report",
             prompt: `Lies die drei bestehenden Dateien. Setze mit edit ausschließlich relevante
-Findings für den Visual Report um. Bewahre gute Gestaltung, belegte Aussagen, Infografiken und
-alle Bild-Slots; keine Komplett-Neuschreibung und keine neuen Dateien.
+Findings in index.html und report.ts für den Visual Report um. styles.css bleibt unverändert.
+Bewahre gute Gestaltung, belegte Aussagen, Infografiken und alle Bild-Slots; keine
+Komplett-Neuschreibung, keine neuen CSS-Klassen und keine neuen Dateien.
 
 ${consolidatedFindings}`,
             progress: 96,
             kind: "report-final-patch-visual",
             systemPrompt: reportDesignerSystemPrompt(true),
             workspaceDir: workspace.visualReport.root,
+            workspaceEditableFiles: ["index.html", "report.ts"],
             toolMode: "read-edit",
             signal: groupSignal,
           }),
@@ -2681,12 +2698,14 @@ ${consolidatedFindings}`,
               run,
               name: "Report-Schlusskorrektur · Tageszeitung",
               prompt: `Die finale statische Prüfung meldet folgende Befunde:\n${finalStaticFeedback}\n
-Lies die bestehenden Dateien und korrigiere mit edit ausschließlich die Befunde der
-Tageszeitung. Bewahre Inhalte, Seiten und Bild-Hooks. Keine neuen Dateien.`,
+Lies die bestehenden Dateien und korrigiere mit edit ausschließlich index.html und report.ts
+für die Befunde der Tageszeitung. styles.css bleibt unverändert. Bewahre Inhalte, Seiten und
+Bild-Hooks. Keine neuen CSS-Klassen oder Dateien.`,
               progress: 97,
               kind: "report-final-static-fix-newspaper",
               systemPrompt: reportDesignerSystemPrompt(true),
               workspaceDir: workspace.newspaper.root,
+              workspaceEditableFiles: ["index.html", "report.ts"],
               toolMode: "read-edit",
               signal: groupSignal,
             }),
@@ -2695,12 +2714,14 @@ Tageszeitung. Bewahre Inhalte, Seiten und Bild-Hooks. Keine neuen Dateien.`,
               run,
               name: "Report-Schlusskorrektur · Visual Report",
               prompt: `Die finale statische Prüfung meldet folgende Befunde:\n${finalStaticFeedback}\n
-Lies die bestehenden Dateien und korrigiere mit edit ausschließlich die Befunde des
-Visual Reports. Bewahre belegte Infografiken und alle drei Bild-Hooks. Keine neuen Dateien.`,
+Lies die bestehenden Dateien und korrigiere mit edit ausschließlich index.html und report.ts
+für die Befunde des Visual Reports. styles.css bleibt unverändert. Bewahre belegte Infografiken
+und alle drei Bild-Hooks. Keine neuen CSS-Klassen oder Dateien.`,
               progress: 97,
               kind: "report-final-static-fix-visual",
               systemPrompt: reportDesignerSystemPrompt(true),
               workspaceDir: workspace.visualReport.root,
+              workspaceEditableFiles: ["index.html", "report.ts"],
               toolMode: "read-edit",
               signal: groupSignal,
             }),
@@ -2739,7 +2760,7 @@ Visual Reports. Bewahre belegte Infografiken und alle drei Bild-Hooks. Keine neu
         const workspaceKind = kind === "newspaper" ? "newspaper" : "visual-report";
         const presentation = await createPresentation({
           kind,
-          finalMarkdown,
+          finalMarkdown: reportSourceMarkdown,
           reportPackage: reportAssembly.reportPackage,
           reportCss: scopeReportCss(
             kind === "newspaper"
@@ -3091,7 +3112,8 @@ export async function generateAdditionalPresentation(runId: string, kind: Presen
     )
     .get(runId) as (RunRow & { artifact_id: string; content: string }) | undefined;
   if (!row) throw new Error("Finales Ergebnis ist noch nicht vorhanden.");
-  const sections = splitNewspaperSections(row.content);
+  const reportSourceMarkdown = finalSynthesisMarkdown(row.content);
+  const sections = resultNewspaperSections(reportSourceMarkdown);
   let assembly: Awaited<ReturnType<typeof assembleReportWorkspace>> | undefined;
   if (kind !== "text") {
     const expectedPageSlugs = sections.map((section) => section.slug);
@@ -3112,21 +3134,24 @@ export async function generateAdditionalPresentation(runId: string, kind: Presen
         run: row,
         name:
           kind === "newspaper" ? "Report-Rebuild · Tageszeitung" : "Report-Rebuild · Visual Report",
-        prompt: `Lies index.html, styles.css und report.ts. Bearbeite die vorhandenen Templates
-mit read und edit zu einer vollständigen ${
+        prompt: `Lies index.html, styles.css und report.ts. styles.css ist systemseitig gestaltet
+und schreibgeschützt. Bearbeite ausschließlich index.html und report.ts mit read und edit zu
+einer vollständigen ${
           kind === "newspaper"
-            ? "mehrseitigen Tageszeitung"
-            : "visuellen, infografikreichen HTML-Publikation"
-        }. Erfinde keine Fakten. report.ts bleibt ein reines Literalmanifest. Antworte nur mit
-einer kurzen Änderungsübersicht.
+            ? "resultatorientierten Tageszeitung mit prägnanter Titelseite und fünf Artikeln"
+            : "kollisionsfreien visuellen HTML-Publikation über Ergebnis, Gründe, Risiken und Maßnahmen"
+        }. Verwende nur die vorhandenen CSS-Klassen. Erfinde keine Fakten. Interne Council-Schritte
+sind kein sichtbares Ressort. report.ts bleibt ein reines Literalmanifest. Antworte nur mit einer
+kurzen Änderungsübersicht.
 
 FINALES COUNCIL-ERGEBNIS:
-${row.content}`,
+  ${reportSourceMarkdown}`,
         progress: 96,
         kind: `report-rebuild-${kind}`,
         systemPrompt: reportDesignerSystemPrompt(true),
         skillHashes: { [REPORT_DESIGN_SKILL_FILE]: sha256(designSkill) },
         workspaceDir: branch.root,
+        workspaceEditableFiles: ["index.html", "report.ts"],
         toolMode: "read-edit",
       });
       const validation = await validateReportWorkspace(runId, expectedPageSlugs);
@@ -3140,7 +3165,7 @@ ${row.content}`,
   const workspaceKind = kind === "newspaper" ? "newspaper" : "visual-report";
   const result = await createPresentation({
     kind,
-    finalMarkdown: kind === "text" ? finalSynthesisMarkdown(row.content) : row.content,
+    finalMarkdown: reportSourceMarkdown,
     reportPackage: assembly?.reportPackage,
     reportCss:
       kind === "text" || !assembly

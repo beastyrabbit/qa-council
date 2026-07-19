@@ -144,6 +144,14 @@ const sectionRoutes: Record<string, { slug: string; title: string }> = {
   },
 };
 
+const RESULT_NEWSPAPER_PAGES = [
+  { slug: "urteil", title: "Das Urteil" },
+  { slug: "staerken", title: "Was trägt" },
+  { slug: "risiken", title: "Risiken und Lücken" },
+  { slug: "massnahmen", title: "Was jetzt zu tun ist" },
+  { slug: "belege", title: "Warum das Urteil trägt" },
+] as const;
+
 function slugify(value: string) {
   return value
     .normalize("NFKD")
@@ -190,11 +198,17 @@ export function finalSynthesisMarkdown(markdown: string) {
   const start = markdown.indexOf(heading);
   if (start < 0) return markdown;
   const bodyStart = start + heading.length;
-  const rest = markdown.slice(bodyStart);
-  const next = rest.search(/\n## (?!#)/);
-  const body = (next >= 0 ? rest.slice(0, next) : rest).trim();
+  const nextCanonicalSection = markdown.indexOf("\n## Triage und RACI", bodyStart);
+  const body = markdown
+    .slice(bodyStart, nextCanonicalSection >= 0 ? nextCanonicalSection : markdown.length)
+    .trim();
   const title = markdown.match(/^#\s+.+$/m)?.[0] ?? "# QA-Council-Ergebnis";
   return `${title}\n\n${heading}\n\n${body}\n`;
+}
+
+export function resultNewspaperSections(markdown: string): NewspaperSection[] {
+  const synthesis = finalSynthesisMarkdown(markdown);
+  return RESULT_NEWSPAPER_PAGES.map((page) => ({ ...page, markdown: synthesis }));
 }
 
 function newspaperNav(sections: NewspaperSection[], activeSlug: string) {
@@ -243,7 +257,7 @@ export function reportDesignerPrompt(options: {
   documentName: string;
   automaticLanguage: boolean;
 }) {
-  const sections = splitNewspaperSections(options.finalMarkdown);
+  const sections = resultNewspaperSections(options.finalMarkdown);
   const pageManifest = sections
     .map((section) => `- slug="${section.slug}", Inhaltsbereich="${section.title}"`)
     .join("\n");
@@ -290,7 +304,7 @@ export async function createPresentation(options: {
   generatedMarkdown?: string;
   editorialImageId?: string | null;
 }> {
-  const full = `<article id="volltext" class="result__full"><h2>Vollständiges Council-Ergebnis</h2>${markdownHtml(options.finalMarkdown)}</article>`;
+  const full = `<article id="volltext" class="result__full"><h2>Finales Prüfergebnis</h2>${markdownHtml(options.finalMarkdown)}</article>`;
   if (options.kind === "text") {
     return {
       title: `Prüfergebnis · ${options.documentName}`,
@@ -299,7 +313,7 @@ export async function createPresentation(options: {
   }
 
   const onePaper = options.kind === "onepaper";
-  const sections = splitNewspaperSections(options.finalMarkdown);
+  const sections = resultNewspaperSections(options.finalMarkdown);
   const parsedPackage = parseReportPackage(options.reportPackage ?? "");
   const generatedSource = parsedPackage.source;
   if (!generatedSource) {
