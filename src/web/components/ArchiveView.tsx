@@ -12,7 +12,7 @@ export function ArchiveView({
   runs: RunRecord[];
   openRun: (id: string) => void;
   archiveRun: (run: RunRecord, archived: boolean) => Promise<void>;
-  deleteStoppedRun: (run: RunRecord) => Promise<void>;
+  deleteStoppedRun: (run: RunRecord) => void;
 }) {
   return (
     <div className="archive-page">

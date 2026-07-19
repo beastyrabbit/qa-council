@@ -13,7 +13,7 @@ export function DocumentsListView({
   latestRunByDocument: Map<string, RunRecord>;
   openDocument: (id: string) => void;
   reviewDocument: (id: string) => void;
-  removeDocument: (id: string) => Promise<void>;
+  removeDocument: (id: string) => void;
 }) {
   return (
     <div className="documents-page">

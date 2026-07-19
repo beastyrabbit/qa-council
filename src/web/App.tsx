@@ -1,6 +1,38 @@
 /* biome-ignore-all lint/security/noDangerouslySetInnerHtml: Presentation-HTML wird serverseitig per expliziter Allowlist sanitisiert. */
-import { Archive, FlaskConical, FolderOpen, Menu, Newspaper, Settings, Sheet } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Archive,
+  CircleAlert,
+  FlaskConical,
+  FolderOpen,
+  type LucideIcon,
+  Newspaper,
+  Settings,
+  Sheet,
+  WifiOff,
+} from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarTrigger,
+  useSidebar,
+} from "@/components/ui/sidebar";
+import { Toaster } from "@/components/ui/sonner";
+import { Spinner } from "@/components/ui/spinner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import type {
   AppSettings,
   ComparisonRecord,
@@ -21,6 +53,7 @@ import {
   useFileDrop,
 } from "./components/AppViews";
 import { FileReader } from "./components/FileReader";
+import { ConfirmDialog, type ConfirmRequest } from "./components/ViewShared";
 import {
   ArchiveView,
   DocumentsListView,
@@ -76,13 +109,153 @@ export function routeFromPath(
 }
 
 function VersionFooter() {
-  return <footer className="app-version">Version: {__APP_VERSION__}</footer>;
+  return (
+    <footer className="fixed right-2.5 bottom-2 z-50">
+      <Badge variant="outline" className="bg-background/90 font-mono text-[10px] tracking-wide">
+        Version: {__APP_VERSION__}
+      </Badge>
+    </footer>
+  );
+}
+
+const NAV_GROUPS: {
+  label: string;
+  items: { view: MainView; label: string; icon: LucideIcon }[];
+}[] = [
+  {
+    label: "Arbeit",
+    items: [
+      { view: "review", label: "Prüfen", icon: Sheet },
+      { view: "documents", label: "Dokumente", icon: FolderOpen },
+      { view: "runs", label: "Läufe", icon: Newspaper },
+      { view: "archive", label: "Archiv", icon: Archive },
+    ],
+  },
+  {
+    label: "System",
+    items: [
+      { view: "tests", label: "Testmodus", icon: FlaskConical },
+      { view: "settings", label: "Einstellungen", icon: Settings },
+    ],
+  },
+];
+
+const ACTIVE_RUN_STATUSES = new Set(["queued", "running", "cancelling", "waiting_for_input"]);
+
+function AppSidebar({
+  view,
+  runs,
+  navigateView,
+  openRun,
+}: {
+  view: MainView;
+  runs: RunRecord[];
+  navigateView: (view: MainView) => void;
+  openRun: (id: string) => void;
+}) {
+  const { setOpenMobile } = useSidebar();
+  const activeRuns = runs.filter((run) => !run.archivedAt && ACTIVE_RUN_STATUSES.has(run.status));
+  return (
+    <Sidebar collapsible="offcanvas" className="sidebar">
+      <SidebarHeader>
+        <div className="flex items-center gap-3 px-2 py-1.5">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary font-heading text-sm font-bold text-primary-foreground">
+            QC
+          </div>
+          <div className="flex flex-col">
+            <strong className="font-heading text-sm leading-tight">QA Council</strong>
+            <span className="text-xs text-muted-foreground">Prüfwerkstatt</span>
+          </div>
+        </div>
+      </SidebarHeader>
+      <SidebarContent>
+        <nav>
+          {NAV_GROUPS.map((group) => (
+            <SidebarGroup key={group.label}>
+              <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {group.items.map((item) => (
+                    <SidebarMenuItem key={item.view}>
+                      <SidebarMenuButton
+                        isActive={view === item.view}
+                        render={
+                          <a
+                            href={VIEW_PATHS[item.view]}
+                            onClick={(event) => {
+                              if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+                              event.preventDefault();
+                              navigateView(item.view);
+                              setOpenMobile(false);
+                            }}
+                          />
+                        }
+                      >
+                        <item.icon />
+                        <span>{item.label}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          ))}
+        </nav>
+        {activeRuns.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Aktive Läufe</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {activeRuns.slice(0, 4).map((run) => {
+                  const waiting = run.status === "waiting_for_input";
+                  return (
+                    <SidebarMenuItem key={run.id}>
+                      <SidebarMenuButton
+                        render={
+                          <a
+                            href={`/laeufe/${run.id}`}
+                            title={run.documentName}
+                            onClick={(event) => {
+                              if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+                              event.preventDefault();
+                              openRun(run.id);
+                              setOpenMobile(false);
+                            }}
+                          />
+                        }
+                      >
+                        {waiting ? (
+                          <CircleAlert className="animate-pulse text-amber-600 dark:text-amber-400" />
+                        ) : (
+                          <Spinner />
+                        )}
+                        <span>{run.documentName}</span>
+                      </SidebarMenuButton>
+                      <SidebarMenuBadge>
+                        {waiting ? "Rückfrage" : `${run.progress} %`}
+                      </SidebarMenuBadge>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+      </SidebarContent>
+      <SidebarFooter>
+        <p className="px-2 text-xs text-muted-foreground">
+          Skill-Quellen werden bei jedem Lauf hash-geprüft.
+        </p>
+      </SidebarFooter>
+    </Sidebar>
+  );
 }
 
 export function App() {
   const initialRoute = routeFromPath();
   const [view, setView] = useState<MainView>(initialRoute.view);
-  const [mobileNav, setMobileNav] = useState(false);
+  const [connectionLost, setConnectionLost] = useState(false);
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [comparisons, setComparisons] = useState<ComparisonRecord[]>([]);
@@ -132,8 +305,9 @@ export function App() {
           setDocuments(documentItems);
           setRuns(runItems);
           setComparisons(comparisonItems);
+          setConnectionLost(false);
         })
-        .catch((reason) => setMessage(reason instanceof Error ? reason.message : String(reason)));
+        .catch(() => setConnectionLost(true));
     }, 2_000);
     return () => window.clearInterval(timer);
   }, [load]);
@@ -172,7 +346,6 @@ export function App() {
     setArtifactId(null);
     setFileAttempt(null);
     setView(nextView);
-    setMobileNav(false);
   }, []);
 
   const openRun = useCallback((id: string) => {
@@ -348,10 +521,18 @@ export function App() {
     }
   }
 
-  async function removeDocument(id: string) {
-    await api(`/api/documents/${id}`, { method: "DELETE" });
-    if (selected === id) setSelected("");
-    await load();
+  function removeDocument(id: string) {
+    const name = documents.find((doc) => doc.id === id)?.name ?? "Dokument";
+    setConfirmRequest({
+      title: "Dokument löschen?",
+      description: `„${name}“ wird mitsamt zugehörigen Läufen dauerhaft entfernt.`,
+      confirmLabel: "Dauerhaft löschen",
+      action: async () => {
+        await api(`/api/documents/${id}`, { method: "DELETE" });
+        if (selected === id) setSelected("");
+        await load();
+      },
+    });
   }
 
   async function openRunResult(id: string) {
@@ -376,20 +557,26 @@ export function App() {
 
   async function archiveAllRuns() {
     const result = await api<{ archived: number }>("/api/runs/archive-all", { method: "PUT" });
-    setMessage(
-      result.archived
-        ? `${result.archived} abgeschlossene Läufe archiviert.`
-        : "Keine weiteren abgeschlossenen Läufe zum Archivieren.",
-    );
+    if (result.archived) {
+      toast.success(`${result.archived} abgeschlossene Läufe archiviert.`);
+    } else {
+      toast.info("Keine weiteren abgeschlossenen Läufe zum Archivieren.");
+    }
     await load();
   }
 
-  async function deleteStoppedRun(run: RunRecord) {
+  function deleteStoppedRun(run: RunRecord) {
     if (!["failed", "cancelled"].includes(run.status)) return;
     const label = run.status === "failed" ? "Fehlgeschlagenen" : "Abgebrochenen";
-    if (!window.confirm(`${label} Lauf für „${run.documentName}“ dauerhaft löschen?`)) return;
-    await api(`/api/runs/${run.id}`, { method: "DELETE" });
-    await load();
+    setConfirmRequest({
+      title: `${label} Lauf löschen?`,
+      description: `Der Lauf für „${run.documentName}“ wird dauerhaft gelöscht.`,
+      confirmLabel: "Dauerhaft löschen",
+      action: async () => {
+        await api(`/api/runs/${run.id}`, { method: "DELETE" });
+        await load();
+      },
+    });
   }
 
   const selectedDocument = documents.find((doc) => doc.id === selected);
@@ -397,6 +584,21 @@ export function App() {
   const latestRunByDocument = useMemo(
     () => new Map(runs.filter((run) => !run.archivedAt).map((run) => [run.documentId, run])),
     [runs],
+  );
+
+  const overlays = (
+    <>
+      <Toaster position="bottom-right" />
+      <ConfirmDialog request={confirmRequest} onClose={() => setConfirmRequest(null)} />
+      {connectionLost && (
+        <div className="fixed bottom-2 left-2 z-50">
+          <Badge variant="destructive" className="gap-1.5">
+            <WifiOff className="size-3" /> Verbindung unterbrochen
+          </Badge>
+        </div>
+      )}
+      <VersionFooter />
+    </>
   );
 
   if (resultId) {
@@ -408,7 +610,7 @@ export function App() {
           onBack={closePage}
           onPresentationChange={openResult}
         />
-        <VersionFooter />
+        {overlays}
       </>
     );
   }
@@ -424,115 +626,48 @@ export function App() {
             openFile(fileRunId, nextArtifactId, nextAttempt)
           }
         />
-        <VersionFooter />
+        {overlays}
       </>
     );
-  }
-  if (documentId) {
-    return (
-      <>
-        <DocumentView
-          id={documentId}
-          onBack={closeDocument}
-          onReview={reviewDocument}
-          onRun={openRun}
-        />
-        <VersionFooter />
-      </>
-    );
-  }
-  if (detailId) {
-    return (
-      <>
-        <RunView
-          id={detailId}
-          onBack={comparisonId ? () => openComparison(comparisonId) : closePage}
-          onChanged={() => void load()}
-          onResult={openResult}
-          onFile={(nextArtifactId, nextAttempt) => openFile(detailId, nextArtifactId, nextAttempt)}
-          backLabel={comparisonId ? "Vergleich" : "Läufe"}
-        />
-        <VersionFooter />
-      </>
-    );
-  }
-  if (comparisonId) {
-    const comparison = comparisons.find((item) => item.id === comparisonId);
-    if (comparison) {
-      return (
-        <>
-          <ComparisonView
-            comparison={comparison}
-            onBack={closeComparison}
-            onRun={openComparisonRun}
-            onResult={(runId) => void openRunResult(runId)}
-          />
-          <VersionFooter />
-        </>
-      );
-    }
   }
 
-  return (
-    <div className="app-shell">
-      <aside className={`sidebar ${mobileNav ? "sidebar--open" : ""}`}>
-        <div className="brand">
-          <div className="brand__mark">QC</div>
-          <div>
-            <strong>QA Council</strong>
-            <span>Prüfwerkstatt</span>
-          </div>
-        </div>
-        <nav>
-          <button
-            type="button"
-            className={view === "review" ? "active" : ""}
-            onClick={() => navigateView("review")}
-          >
-            <Sheet size={18} /> Prüfen
-          </button>
-          <button
-            type="button"
-            className={view === "documents" ? "active" : ""}
-            onClick={() => navigateView("documents")}
-          >
-            <FolderOpen size={18} /> Dokumente
-          </button>
-          <button
-            type="button"
-            className={view === "runs" ? "active" : ""}
-            onClick={() => navigateView("runs")}
-          >
-            <Newspaper size={18} /> Läufe
-          </button>
-          <button
-            type="button"
-            className={view === "tests" ? "active" : ""}
-            onClick={() => navigateView("tests")}
-          >
-            <FlaskConical size={18} /> Testmodus
-          </button>
-          <button
-            type="button"
-            className={view === "archive" ? "active" : ""}
-            onClick={() => navigateView("archive")}
-          >
-            <Archive size={18} /> Archiv
-          </button>
-          <button
-            type="button"
-            className={view === "settings" ? "active" : ""}
-            onClick={() => navigateView("settings")}
-          >
-            <Settings size={18} /> Einstellungen
-          </button>
-        </nav>
-        <div className="sidebar__foot">Skill-Quellen werden bei jedem Lauf hash-geprüft.</div>
-      </aside>
-      <main className="workspace">
-        <button className="mobile-menu" type="button" onClick={() => setMobileNav(!mobileNav)}>
-          <Menu size={20} /> QA Council
-        </button>
+  const openComparisonRecord = comparisonId
+    ? comparisons.find((item) => item.id === comparisonId)
+    : undefined;
+
+  let content: ReactNode = null;
+  if (documentId) {
+    content = (
+      <DocumentView
+        id={documentId}
+        onBack={closeDocument}
+        onReview={reviewDocument}
+        onRun={openRun}
+      />
+    );
+  } else if (detailId) {
+    content = (
+      <RunView
+        id={detailId}
+        onBack={comparisonId ? () => openComparison(comparisonId) : closePage}
+        onChanged={() => void load()}
+        onResult={openResult}
+        onFile={(nextArtifactId, nextAttempt) => openFile(detailId, nextArtifactId, nextAttempt)}
+        backLabel={comparisonId ? "Vergleich" : "Läufe"}
+      />
+    );
+  } else if (openComparisonRecord) {
+    content = (
+      <ComparisonView
+        comparison={openComparisonRecord}
+        onBack={closeComparison}
+        onRun={openComparisonRun}
+        onResult={(runId) => void openRunResult(runId)}
+      />
+    );
+  } else {
+    content = (
+      <>
         {view === "settings" && settings ? (
           <SettingsView settings={settings} onSaved={setSettings} />
         ) : null}
@@ -603,8 +738,23 @@ export function App() {
             deleteStoppedRun={deleteStoppedRun}
           />
         )}
-      </main>
-      <VersionFooter />
-    </div>
+      </>
+    );
+  }
+
+  return (
+    <TooltipProvider>
+      <SidebarProvider>
+        <AppSidebar view={view} runs={runs} navigateView={navigateView} openRun={openRun} />
+        <SidebarInset className="min-w-0">
+          <header className="flex h-12 items-center gap-2 border-b px-4 md:hidden">
+            <SidebarTrigger />
+            <span className="font-heading text-sm font-semibold">QA Council</span>
+          </header>
+          {content}
+        </SidebarInset>
+        {overlays}
+      </SidebarProvider>
+    </TooltipProvider>
   );
 }

@@ -18,7 +18,7 @@ export function RunsListView({
   openRun: (id: string) => void;
   openRunResult: (id: string) => Promise<void>;
   archiveRun: (run: RunRecord, archived: boolean) => Promise<void>;
-  deleteStoppedRun: (run: RunRecord) => Promise<void>;
+  deleteStoppedRun: (run: RunRecord) => void;
 }) {
   return (
     <div className="runs-page">

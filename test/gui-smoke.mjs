@@ -223,7 +223,7 @@ try {
   }
 
   await navigate("/");
-  await evaluate(`[...document.querySelectorAll(".sidebar nav button")]
+  await evaluate(`[...document.querySelectorAll(".sidebar nav a")]
     .find((button) => button.textContent.includes("Dokumente")).click()`);
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert(
@@ -232,7 +232,7 @@ try {
   );
   checks.push("documents-menu");
 
-  await evaluate(`[...document.querySelectorAll(".sidebar nav button")]
+  await evaluate(`[...document.querySelectorAll(".sidebar nav a")]
     .find((button) => button.textContent.includes("Archiv")).click()`);
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert(
@@ -241,7 +241,7 @@ try {
   );
   checks.push("archive-menu");
 
-  await evaluate(`[...document.querySelectorAll(".sidebar nav button")]
+  await evaluate(`[...document.querySelectorAll(".sidebar nav a")]
     .find((button) => button.textContent.includes("Läufe")).click()`);
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert(
@@ -263,7 +263,7 @@ try {
       "document.body.innerText.includes('archiviert')",
       "Die Oberfläche bestätigte das gemeinsame Archivieren nicht.",
     );
-    await evaluate(`[...document.querySelectorAll(".sidebar nav button")]
+    await evaluate(`[...document.querySelectorAll(".sidebar nav a")]
       .find((button) => button.textContent.includes("Archiv")).click()`);
     await waitFor(
       `document.querySelectorAll(".archive-row").length >= ${archivedForTest.length}`,

@@ -1,6 +1,17 @@
 /* biome-ignore-all lint/security/noDangerouslySetInnerHtml: Presentation-HTML wird serverseitig per expliziter Allowlist sanitisiert. */
 import { Search } from "lucide-react";
 import { type DragEvent, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type {
   DocumentRecord,
   PresentationKind,
@@ -82,6 +93,57 @@ export function formatModelPrice(value: number | undefined) {
   if (value < 0.01) return `$${value.toFixed(4)}`;
   if (value < 1) return `$${value.toFixed(2)}`;
   return `$${value.toFixed(value < 10 ? 2 : 0)}`;
+}
+
+export interface ConfirmRequest {
+  title: string;
+  description?: string;
+  confirmLabel?: string;
+  destructive?: boolean;
+  action: () => void | Promise<void>;
+}
+
+export function ConfirmDialog({
+  request,
+  onClose,
+}: {
+  request: ConfirmRequest | null;
+  onClose: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <AlertDialog open={request !== null} onOpenChange={(open) => !open && !busy && onClose()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{request?.title}</AlertDialogTitle>
+          {request?.description ? (
+            <AlertDialogDescription>{request.description}</AlertDialogDescription>
+          ) : null}
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Abbrechen</AlertDialogCancel>
+          <AlertDialogAction
+            variant={(request?.destructive ?? true) ? "destructive" : "default"}
+            disabled={busy}
+            onClick={() => {
+              if (!request) return;
+              setBusy(true);
+              void Promise.resolve(request.action())
+                .catch((reason) =>
+                  toast.error(reason instanceof Error ? reason.message : String(reason)),
+                )
+                .finally(() => {
+                  setBusy(false);
+                  onClose();
+                });
+            }}
+          >
+            {request?.confirmLabel ?? "Bestätigen"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 }
 
 export function ModelPicker({
