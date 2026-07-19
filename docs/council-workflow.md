@@ -93,10 +93,12 @@ Jeder Lauf beginnt mit Attempt 1. Manueller Restart erzeugt atomar einen neuen A
 auf Ground-or-Ask und Startup-Recovery bleiben im aktuellen Attempt. Stages, Events, Artefakte,
 Presentations, Bilder, Rückfragen und abgeleitete Analysen tragen eine `attempt_no`.
 
-Jede der zehn Phasen schreibt erst nach Erfolg einen versionierten Checkpoint mit Input-Hash und
-Output-Referenzen. Dokument und Extraction-Cache sind attemptübergreifend; Analyse- und
-Reportausgaben bleiben attemptgebunden. Frühere Attempts werden nicht verändert und sind in der
-Laufansicht auswählbar.
+Jede der zehn Phasen schreibt erst nach Erfolg einen versionierten Checkpoint mit
+`analysis_version`, Input-Hash und Output-Referenzen. Die Analyseversion entspricht dem
+QA-Council-Release. Nach einem Releasewechsel werden alte Checkpoints, Extraktionen,
+Retrieval-Passagen und Embeddings nicht wiederverwendet; das Dokument wird unter der neuen
+Version neu analysiert. Analyse- und Reportausgaben bleiben attemptgebunden. Frühere Attempts
+werden nicht verändert und sind in der Laufansicht auswählbar.
 
 ## Finales Audit-Ergebnis
 

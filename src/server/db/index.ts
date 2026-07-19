@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
 import * as schema from "./schema.js";
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 export type SqliteDatabase = Database.Database;
 
 const databaseContext = new AsyncLocalStorage<SqliteDatabase>();
@@ -173,6 +173,7 @@ export function migrateDatabase(database: SqliteDatabase) {
       attempt_no INTEGER NOT NULL,
       phase TEXT NOT NULL,
       checkpoint_version INTEGER NOT NULL,
+      analysis_version TEXT NOT NULL DEFAULT 'legacy',
       input_hash TEXT NOT NULL,
       output_refs_json TEXT NOT NULL DEFAULT '[]',
       inherited_from_attempt INTEGER,
@@ -304,6 +305,12 @@ export function migrateDatabase(database: SqliteDatabase) {
     addColumnIfMissing(database, table, "attempt_no", "INTEGER NOT NULL DEFAULT 1");
   }
   addColumnIfMissing(database, "artifacts", "logical_key", "TEXT");
+  addColumnIfMissing(
+    database,
+    "run_checkpoints",
+    "analysis_version",
+    "TEXT NOT NULL DEFAULT 'legacy'",
+  );
   migratePresentations(database);
 
   database.exec(`

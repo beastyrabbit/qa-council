@@ -88,7 +88,7 @@ describe("Checkpoint-Wiedereinstieg", () => {
     });
   }
 
-  it.each(["checkpoint_version", "input_hash"] as const)(
+  it.each(["checkpoint_version", "analysis_version", "input_hash"] as const)(
     "invalidiert %s und alle nachfolgenden Phasen",
     (column) => {
       const db = seedCheckpointRun();

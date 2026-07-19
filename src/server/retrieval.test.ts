@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { migrateDatabase, type SqliteDatabase, withDatabase } from "./db/index.js";
 import {
   buildRetrievalDossier,
+  DOCUMENT_RETRIEVAL_ANALYSIS_VERSION,
   EMBEDDING_DIMENSIONS,
   embedWithAiBox,
   listAiBoxEmbeddingModels,
@@ -173,6 +174,8 @@ describe("hybride Dokumentretrieval", () => {
     );
 
     expect(first.embedding.status).toBe("ready");
+    expect(first.analysisVersion).toBe(DOCUMENT_RETRIEVAL_ANALYSIS_VERSION);
+    expect(first.markdown).toContain(`**Analyseversion:** ${DOCUMENT_RETRIEVAL_ANALYSIS_VERSION}`);
     expect(first.cards).toHaveLength(3);
     expect(first.cards[0]?.content).toContain("ausschließlich ein Such- und Navigationsindex");
     expect(first.chunks[0]?.neighbors.map((neighbor) => neighbor.chunkId)).toContain("chunk-3");

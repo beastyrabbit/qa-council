@@ -57,7 +57,7 @@ describe("buildApp", () => {
     expect(health.json()).toEqual({
       ok: true,
       version: JSON.parse(readFileSync("package.json", "utf8")).version,
-      schemaVersion: 4,
+      schemaVersion: 5,
     });
 
     const summary = await app.inject({ method: "GET", url: "/api/runs/run?attempt=1" });

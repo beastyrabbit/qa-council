@@ -142,13 +142,20 @@ describe("0.3.0-Datenbankmigration", () => {
 
   it("richtet den rekonstruierbaren Hybrid-Retrieval-Index ein", () => {
     database = migrateDatabase(new Database(":memory:"));
-    expect(database.pragma("user_version", { simple: true })).toBe(4);
+    expect(database.pragma("user_version", { simple: true })).toBe(5);
     expect(database.prepare("SELECT vec_version() AS version").get()).toMatchObject({
       version: expect.stringMatching(/^v0\.1\./),
     });
     expect(
       database.prepare("SELECT value FROM app_settings WHERE key = 'embeddingConfig'").get(),
     ).toMatchObject({ value: expect.stringContaining("qwen3-embedding:8b") });
+    expect(
+      database
+        .prepare(
+          "SELECT dflt_value FROM pragma_table_info('run_checkpoints') WHERE name = 'analysis_version'",
+        )
+        .get(),
+    ).toEqual({ dflt_value: "'legacy'" });
     expect(
       database
         .prepare(

@@ -58,16 +58,17 @@ docs/                      Projektdokumentation
    Codex-Seitenbeschreibungen laufen gleichzeitig; jede fertige Seite wird sofort in SQLite
    gesichert und nach Timeout einmal wiederholt.
 6. Vollständige Extraktionen und erfolgreiche Seiten-Checkpoints werden über Dokument-Hash,
-   Dateityp, Pipelineversion, Renderer-/Promptversion und Codex-Modell gecacht. Unterbrochene
-   Extraktionsläufe werden nach einem Neustart aus den Checkpoints fortgesetzt.
+   QA-Council-Release, Dateityp, Pipelineversion, Renderer-/Promptversion und Codex-Modell
+   gecacht. Ein neues Release invalidiert die Dokumentanalyse bewusst, damit geändertes Chunking,
+   neue Prompts oder andere Extraktionslogik nicht auf veralteten Daten aufbauen.
 7. Der extrahierte Text wird vollständig in Originalchunks mit Position, Locator und Hash zerlegt.
    Bei großen Dokumenten entstehen zusätzlich kleinere, offsettreue Retrieval-Passagen.
 8. Eine lokale Voranalyse verbindet exakte Begriffe, strukturell benachbarte Chunks und semantisch
    ähnliche Passagen. Dafür werden standardmäßig `qwen3-embedding:8b` auf der AI Box und ein
    dokumenthashbasierter `sqlite-vec`-Cache verwendet. Ist das Embedding-Modell nicht erreichbar,
-   bleibt die exakte und strukturelle Analyse verfügbar. Ändert sich die Retrieval-Schemaversion,
-   ersetzt der neue Vektor den Cacheeintrag derselben Quelle atomar, statt mit dessen
-   Eindeutigkeitsregel zu kollidieren.
+   bleibt die exakte und strukturelle Analyse verfügbar. Release- und Retrieval-Schemaversion
+   gehören zu Passagen-, Vektor- und Evidence-Fingerprints. Bei einem Versionswechsel werden
+   Voranalyse und Embeddings neu aufgebaut.
 9. Die Voranalyse erzeugt ausschließlich Such- und Navigationshinweise: mögliche RACI-Aktivitäten,
    betroffene Rollen, kompakte extraktive Chunk-Zusammenfassungen aus mehreren unveränderten
    Originalauszügen und dokumentweite Chunk-Beziehungen. Sie ist weder Fachreview noch Quelle.
@@ -117,7 +118,7 @@ Die Datei liegt unter `${DATA_DIR}/qa-council.sqlite`. SQLite läuft im WAL-Modu
 | `embedding_vectors` | Ableitbarer `sqlite-vec`-Index für Chunks, Passagen und RACI-Zeilen |
 | `runs` | Konfiguration, Status und Fortschritt eines Council-Laufs |
 | `run_attempts` | Unveränderliche Versuche mit Vorgänger und Wiedereinstiegsphase |
-| `run_checkpoints` | Versionierte Phasen-Checkpoints mit Input-Hash und Output-Referenzen |
+| `run_checkpoints` | Phasen-Checkpoints mit Release-Analyseversion, Input-Hash und Output-Referenzen |
 | `comparisons` | Gemeinsame Quelle und Konfiguration eines getrennten Providervergleichs |
 | `run_stages` | Attemptgebundene Modellstufen, Tokenverbrauch, Kosten und Prompt-Hash |
 | `run_questions` | Ground-or-Ask-Rückfragen und Antworten |

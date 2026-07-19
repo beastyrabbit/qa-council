@@ -4,8 +4,10 @@ import type { QaRole, RaciCatalogRow } from "./raci.js";
 import { QA_ROLES, raciCatalog } from "./raci.js";
 import { safeParse } from "./safe-json.js";
 import { sha256 } from "./skills.js";
+import { APP_VERSION } from "./version.js";
 
 export const RETRIEVAL_SCHEMA_VERSION = 2;
+export const DOCUMENT_RETRIEVAL_ANALYSIS_VERSION = `${APP_VERSION}/retrieval@${RETRIEVAL_SCHEMA_VERSION}`;
 export const EMBEDDING_DIMENSIONS = 4096;
 export const DEFAULT_EMBEDDING_MODEL = "qwen3-embedding:8b";
 
@@ -113,6 +115,8 @@ export interface ChunkRetrievalHint {
 
 export interface RetrievalDossier {
   version: number;
+  appVersion: string;
+  analysisVersion: string;
   documentId: string;
   embedding: {
     status: "ready" | "disabled" | "unavailable";
@@ -162,7 +166,12 @@ export function embeddingConfig(): EmbeddingConfig {
 }
 
 export function embeddingConfigFingerprint() {
-  return sha256(JSON.stringify({ version: RETRIEVAL_SCHEMA_VERSION, ...embeddingConfig() }));
+  return sha256(
+    JSON.stringify({
+      analysisVersion: DOCUMENT_RETRIEVAL_ANALYSIS_VERSION,
+      ...embeddingConfig(),
+    }),
+  );
 }
 
 function aiboxBaseUrl() {
@@ -287,7 +296,7 @@ export function splitRetrievalPassages(
       const position = passages.length;
       passages.push({
         id: sha256(
-          `${documentId}:${chunk.id}:${chunk.sha256}:${position}:${startOffset}:${endOffset}`,
+          `${DOCUMENT_RETRIEVAL_ANALYSIS_VERSION}:${documentId}:${chunk.id}:${chunk.sha256}:${position}:${startOffset}:${endOffset}`,
         ).slice(0, 32),
         documentId,
         chunkId: chunk.id,
@@ -378,7 +387,7 @@ async function ensureEmbeddings(
   );
   for (const source of sources) {
     const vectorId = sha256(
-      `${RETRIEVAL_SCHEMA_VERSION}:${config.model}:${config.dimensions}:${source.kind}:${source.sourceId}:${source.sourceHash}`,
+      `${DOCUMENT_RETRIEVAL_ANALYSIS_VERSION}:${config.model}:${config.dimensions}:${source.kind}:${source.sourceId}:${source.sourceHash}`,
     );
     vectorIds.set(sourceKey(source), vectorId);
     if (!cached.get(vectorId, source.sourceHash, config.model, config.dimensions)) {
@@ -890,6 +899,8 @@ Responsibilities: ${QA_ROLES.map((role) => `${role}=${row.responsibilities[role]
 
 **Regel:** Alle folgenden RACI-Zuordnungen und Beziehungen sind unverbindliche Navigationshinweise. Sie ersetzen weder das Original noch ein Rollenreview. Jeder fachliche Befund muss am Originalchunk geprüft werden.
 
+**Analyseversion:** ${DOCUMENT_RETRIEVAL_ANALYSIS_VERSION}
+
 **Retrieval:** ${
     embeddingStatus.status === "ready"
       ? `hybrid · lokale Embeddings ${embeddingStatus.model} · exakte Begriffe · strukturelle Nachbarschaft`
@@ -902,6 +913,8 @@ ${cards.map((card) => card.content).join("\n\n---\n\n")}`;
 
   return {
     version: RETRIEVAL_SCHEMA_VERSION,
+    appVersion: APP_VERSION,
+    analysisVersion: DOCUMENT_RETRIEVAL_ANALYSIS_VERSION,
     documentId: options.documentId,
     embedding: embeddingStatus,
     chunks: hints,

@@ -5,7 +5,12 @@ import { z } from "zod";
 import type { CouncilMode, ImageProvider, PresentationKind, ProviderId } from "../shared/types.js";
 import { aggregatePeerRankings, councilRoundCount, crossReviewPasses } from "./council-plan.js";
 import { currentDatabase, sqlite } from "./db/index.js";
-import { type ExtractedDocument, extractDocument, extractionFingerprint } from "./extract.js";
+import {
+  DOCUMENT_EXTRACTION_ANALYSIS_VERSION,
+  type ExtractedDocument,
+  extractDocument,
+  extractionFingerprint,
+} from "./extract.js";
 import { createPresentationScreenshot } from "./pdf.js";
 import {
   createPresentation,
@@ -35,6 +40,7 @@ import {
 } from "./report-workspace.js";
 import {
   buildRetrievalDossier,
+  DOCUMENT_RETRIEVAL_ANALYSIS_VERSION,
   embeddingConfigFingerprint,
   type RetrievalDossier,
   roleDocumentBriefing,
@@ -49,6 +55,7 @@ import {
   sha256,
 } from "./skills.js";
 import { SupervisorSubmissionError, validateSingleSubmission } from "./structured-submit.js";
+import { APP_VERSION } from "./version.js";
 
 type Role = QaRole;
 
@@ -181,6 +188,7 @@ function currentAttempt(runId: string) {
 interface CheckpointRow {
   phase: PipelinePhase;
   checkpoint_version: number;
+  analysis_version: string;
   input_hash: string;
   output_refs_json: string;
   inherited_from_attempt: number | null;
@@ -277,6 +285,7 @@ function loadCheckpointStages(run: RunRow, checkpoint: CheckpointRow) {
 function announceCheckpointReuse(run: RunRow, phase: PipelinePhase, checkpoint: CheckpointRow) {
   event(run.id, "checkpoint_reused", `Checkpoint wiederverwendet: ${phase}`, {
     phase,
+    analysisVersion: checkpoint.analysis_version,
     originAttempt: checkpointOriginAttempt(run, checkpoint),
   });
 }
@@ -303,6 +312,7 @@ function checkpointInputHash(
       },
       phase,
       version: PHASE_VERSIONS[phase],
+      analysisVersion: APP_VERSION,
       upstream: upstream.map(({ phase: upstreamPhase, checkpoint_version, input_hash }) => ({
         phase: upstreamPhase,
         checkpoint_version,
@@ -325,7 +335,7 @@ function checkpointInputHash(
 export function validCheckpoints(run: RunRow, attemptNo = run.current_attempt) {
   const rows = sqlite
     .prepare(
-      `SELECT phase, checkpoint_version, input_hash, output_refs_json,
+      `SELECT phase, checkpoint_version, analysis_version, input_hash, output_refs_json,
               inherited_from_attempt
        FROM run_checkpoints WHERE run_id = ? AND attempt_no = ?`,
     )
@@ -338,6 +348,7 @@ export function validCheckpoints(run: RunRow, attemptNo = run.current_attempt) {
     if (
       !row ||
       row.checkpoint_version !== PHASE_VERSIONS[phase] ||
+      row.analysis_version !== APP_VERSION ||
       row.input_hash !== checkpointInputHash(run, phase, upstream) ||
       !checkpointReferencesExist(run, row, attemptNo)
     ) {
@@ -353,7 +364,7 @@ export function completeCheckpoint(run: RunRow, phase: PipelinePhase, outputRefs
   const phaseIndex = PIPELINE_PHASES.indexOf(phase);
   const upstream = sqlite
     .prepare(
-      `SELECT phase, checkpoint_version, input_hash, output_refs_json,
+      `SELECT phase, checkpoint_version, analysis_version, input_hash, output_refs_json,
               inherited_from_attempt
        FROM run_checkpoints WHERE run_id = ? AND attempt_no = ?`,
     )
@@ -371,11 +382,12 @@ export function completeCheckpoint(run: RunRow, phase: PipelinePhase, outputRefs
   sqlite
     .prepare(
       `INSERT INTO run_checkpoints(
-        run_id, attempt_no, phase, checkpoint_version, input_hash,
+        run_id, attempt_no, phase, checkpoint_version, analysis_version, input_hash,
         output_refs_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(run_id, attempt_no, phase) DO UPDATE SET
         checkpoint_version = excluded.checkpoint_version,
+        analysis_version = excluded.analysis_version,
         input_hash = excluded.input_hash,
         output_refs_json = excluded.output_refs_json,
         inherited_from_attempt = NULL,
@@ -386,6 +398,7 @@ export function completeCheckpoint(run: RunRow, phase: PipelinePhase, outputRefs
       run.current_attempt,
       phase,
       PHASE_VERSIONS[phase],
+      APP_VERSION,
       inputHash,
       JSON.stringify(outputRefs),
       now(),
@@ -393,6 +406,7 @@ export function completeCheckpoint(run: RunRow, phase: PipelinePhase, outputRefs
   event(run.id, "checkpoint_completed", `Checkpoint abgeschlossen: ${phase}`, {
     phase,
     version: PHASE_VERSIONS[phase],
+    analysisVersion: APP_VERSION,
     inputHash,
   });
   return inputHash;
@@ -1126,12 +1140,19 @@ async function ensureDocumentExtraction(run: RunRow, signal: AbortSignal) {
       reused,
       chunks: chunkCount,
       documentId: run.document_id,
+      appVersion: APP_VERSION,
+      analysisVersion: DOCUMENT_EXTRACTION_ANALYSIS_VERSION,
     });
     event(
       run.id,
       "stage_completed",
       `${stageName} abgeschlossen`,
-      { reused, chunks: chunkCount },
+      {
+        reused,
+        chunks: chunkCount,
+        appVersion: APP_VERSION,
+        analysisVersion: DOCUMENT_EXTRACTION_ANALYSIS_VERSION,
+      },
       "info",
       stageId,
     );
@@ -1330,6 +1351,8 @@ async function buildEvidence(run: RunRow, context: ReturnType<typeof documentCon
     "Großes Dokument: hybride, quelltreue Voranalyse wird aufgebaut",
     {
       chunks: context.chunks.length,
+      appVersion: APP_VERSION,
+      analysisVersion: DOCUMENT_RETRIEVAL_ANALYSIS_VERSION,
     },
   );
   const stageId = nanoid();
@@ -1349,7 +1372,12 @@ async function buildEvidence(run: RunRow, context: ReturnType<typeof documentCon
     run.id,
     "stage_started",
     stageName,
-    { chunks: context.chunks.length, strategy: "hybrid-retrieval" },
+    {
+      chunks: context.chunks.length,
+      strategy: "hybrid-retrieval",
+      appVersion: APP_VERSION,
+      analysisVersion: DOCUMENT_RETRIEVAL_ANALYSIS_VERSION,
+    },
     "info",
     stageId,
   );
@@ -1374,6 +1402,8 @@ async function buildEvidence(run: RunRow, context: ReturnType<typeof documentCon
       artifact(run.id, stageId, "evidence-map", card.title, card.content, {
         strategy: "hybrid-retrieval",
         retrievalVersion: dossier.version,
+        appVersion: dossier.appVersion,
+        analysisVersion: dossier.analysisVersion,
         embedding: dossier.embedding,
         locator: card.hint.locator,
         chunkId: card.hint.chunkId,
@@ -1389,6 +1419,8 @@ async function buildEvidence(run: RunRow, context: ReturnType<typeof documentCon
         chunks: context.chunks.length,
         embedding: dossier.embedding,
         artifacts: artifactIds.length,
+        appVersion: dossier.appVersion,
+        analysisVersion: dossier.analysisVersion,
       },
       "info",
       stageId,
@@ -1552,6 +1584,8 @@ export async function executeRun(runId: string) {
         {
           chunks: context.chunks.length,
           sourceSha256: sha256(Buffer.from(run.extracted_text)),
+          appVersion: APP_VERSION,
+          analysisVersion: DOCUMENT_RETRIEVAL_ANALYSIS_VERSION,
         },
       );
       const builtEvidence = await buildEvidence(run, context);
@@ -2999,15 +3033,16 @@ export function restartRun(runId: string, enqueue = true) {
       sqlite
         .prepare(
           `INSERT INTO run_checkpoints(
-             run_id, attempt_no, phase, checkpoint_version, input_hash,
+             run_id, attempt_no, phase, checkpoint_version, analysis_version, input_hash,
              output_refs_json, inherited_from_attempt, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           runId,
           attempt,
           phase,
           checkpoint.checkpoint_version,
+          checkpoint.analysis_version,
           checkpoint.input_hash,
           checkpoint.output_refs_json,
           checkpoint.inherited_from_attempt ?? predecessorAttempt,

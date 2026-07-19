@@ -75,6 +75,8 @@ describe("dokumentweite Rollenreviews", () => {
     ];
     const dossier: RetrievalDossier = {
       version: 1,
+      appVersion: "test",
+      analysisVersion: "test/retrieval@1",
       documentId: "doc",
       embedding: {
         status: "ready",

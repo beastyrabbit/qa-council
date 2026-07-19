@@ -7,6 +7,7 @@ import { nanoid } from "nanoid";
 import sanitizeHtml from "sanitize-html";
 import { providerRow, runPiStage } from "./providers.js";
 import { sha256 } from "./skills.js";
+import { APP_VERSION } from "./version.js";
 
 const execFileAsync = promisify(execFile);
 const DIRECT_EXTENSIONS = new Set([
@@ -151,12 +152,13 @@ export interface ExtractionOptions {
 }
 
 export const EXTRACTION_PIPELINE_VERSION = "2";
+export const DOCUMENT_EXTRACTION_ANALYSIS_VERSION = `${APP_VERSION}/extraction@${EXTRACTION_PIPELINE_VERSION}`;
 
 export function extractionFingerprint(filename: string, mimeType: string, visionModel: string) {
   const extension = path.extname(filename).toLowerCase();
   return sha256(
     [
-      EXTRACTION_PIPELINE_VERSION,
+      DOCUMENT_EXTRACTION_ANALYSIS_VERSION,
       "libreoffice-pdf-v1",
       "poppler-jpeg-144dpi-v1",
       "codex-page-prompt-v1",

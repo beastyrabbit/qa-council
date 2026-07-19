@@ -52,19 +52,7 @@ import { EMBEDDING_DIMENSIONS, embeddingConfig, listAiBoxEmbeddingModels } from 
 import { safeParse } from "./safe-json.js";
 import type { RunScheduler } from "./scheduler.js";
 import { sha256 } from "./skills.js";
-
-function packageVersion() {
-  try {
-    const packageJson = JSON.parse(
-      fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
-    ) as { version?: unknown };
-    return typeof packageJson.version === "string" ? packageJson.version : "unknown";
-  } catch {
-    return "unknown";
-  }
-}
-
-const APP_VERSION = packageVersion();
+import { APP_VERSION } from "./version.js";
 
 export interface AppServices {
   enqueueRun: typeof enqueueRun;

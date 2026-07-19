@@ -121,6 +121,7 @@ export const runCheckpoints = sqliteTable(
     attemptNo: integer("attempt_no").notNull(),
     phase: text("phase").notNull(),
     checkpointVersion: integer("checkpoint_version").notNull(),
+    analysisVersion: text("analysis_version").notNull().default("legacy"),
     inputHash: text("input_hash").notNull(),
     outputRefsJson: text("output_refs_json").notNull().default("[]"),
     inheritedFromAttempt: integer("inherited_from_attempt"),
