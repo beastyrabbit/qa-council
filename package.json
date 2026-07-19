@@ -24,6 +24,9 @@
     "@earendil-works/pi-coding-agent": "^0.80.7",
     "@fastify/multipart": "^10.1.0",
     "@fastify/static": "^10.1.0",
+    "@fontsource-variable/inter": "^5.2.8",
+    "@tailwindcss/vite": "^4.3.3",
+    "@xyflow/react": "^12.11.2",
     "better-sqlite3": "^12.11.1",
     "css-tree": "^3.2.1",
     "drizzle-orm": "^0.45.2",
@@ -35,6 +38,7 @@
     "react-dom": "^19.2.7",
     "sanitize-html": "^2.17.6",
     "sqlite-vec": "^0.1.9",
+    "tailwindcss": "^4.3.3",
     "typebox": "1.1.38",
     "typescript-compiler": "npm:typescript@5.9.3",
     "zod": "^4.4.3"
