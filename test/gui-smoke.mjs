@@ -188,8 +188,9 @@ try {
   );
   assert(page.text.includes("Anbieter vergleichen"), "Testmodus-Seite fehlt.");
   assert(
-    (await evaluate("document.querySelectorAll('.test-provider .search-input input').length")) ===
-      3,
+    (await evaluate(
+      "document.querySelectorAll('.test-provider .search-input[role=\\'combobox\\']').length",
+    )) === 3,
     "Die durchsuchbare Modellauswahl fehlt bei mindestens einem Anbieter.",
   );
   checks.push("comparison-mode-model-search");

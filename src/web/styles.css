@@ -308,16 +308,14 @@
   margin-top: 4px;
   color: var(--qa-muted);
 }
-.file-state,
-.status {
+.file-state {
   font-size: 12px;
   border: 1px solid var(--line);
   padding: 3px 7px;
   border-radius: 6px;
   white-space: nowrap;
 }
-.file-state--ready,
-.status--done {
+.file-state--ready {
   color: #3d5638;
   border-color: #aabd9f;
   background: #eef3e7;
@@ -327,20 +325,12 @@
   border-color: #a9c3d2;
   background: #eaf3f8;
 }
-.file-state--failed,
-.status--error {
+.file-state--failed {
   color: #853a31;
   border-color: #d6aca4;
   background: #faeae4;
 }
-.status--cancelled {
-  color: #675b52;
-  border-color: #c5b8ae;
-  background: #eee9e4;
-}
-.file-state--extracting,
-.status,
-.status--wait {
+.file-state--extracting {
   color: #675b39;
   border-color: #cbbd94;
   background: #f6efd8;
@@ -366,15 +356,13 @@
   gap: 16px;
   padding: 18px 0;
 }
-label > span,
-.model-picker label > span {
+label > span {
   display: block;
   font-size: 13px;
   font-weight: 650;
   margin-bottom: 7px;
 }
-label small,
-.model-picker small {
+label small {
   display: block;
   color: var(--qa-muted);
   margin-top: 6px;
@@ -407,31 +395,6 @@ textarea {
 }
 .control-grid .not-configured {
   color: var(--error);
-}
-.model-picker .not-configured {
-  color: var(--error);
-}
-.model-picker .model-replaced {
-  color: #675b39;
-}
-.model-picker {
-  min-width: 0;
-}
-.model-picker label {
-  margin-bottom: 7px;
-}
-.search-input {
-  position: relative;
-}
-.search-input svg {
-  position: absolute;
-  top: 50%;
-  left: 10px;
-  transform: translateY(-50%);
-  color: var(--qa-muted);
-}
-.search-input input {
-  padding-left: 32px;
 }
 .focus-field {
   display: block;

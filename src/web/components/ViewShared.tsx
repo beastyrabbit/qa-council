@@ -1,5 +1,5 @@
 /* biome-ignore-all lint/security/noDangerouslySetInnerHtml: Presentation-HTML wird serverseitig per expliziter Allowlist sanitisiert. */
-import { Search } from "lucide-react";
+import { Check, ChevronsUpDown, Search } from "lucide-react";
 import { type DragEvent, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -12,6 +12,18 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 import type {
   DocumentRecord,
   PresentationKind,
@@ -160,7 +172,7 @@ export function ModelPicker({
   deferLoad?: boolean;
 }) {
   const [models, setModels] = useState<ProviderModel[]>([]);
-  const [search, setSearch] = useState("");
+  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [replacedModel, setReplacedModel] = useState("");
@@ -186,7 +198,6 @@ export function ModelPicker({
     availabilityCallback.current?.(false);
     setLoadError("");
     setReplacedModel("");
-    setSearch("");
     api<ProviderModel[]>(`/api/providers/${provider}/models`)
       .then((items) => setModels(items))
       .catch((reason) => {
@@ -208,81 +219,120 @@ export function ModelPicker({
     );
   }, [loading, models, value]);
 
-  const filtered = models.filter((model) =>
-    `${model.name} ${model.id}`.toLowerCase().includes(search.toLowerCase()),
-  );
   const selectedModel = models.find((model) => model.id === value);
-  const visibleModels =
-    selectedModel && !filtered.some((model) => model.id === selectedModel.id)
-      ? [selectedModel, ...filtered]
-      : filtered;
+
+  function modelMeta(model: ProviderModel) {
+    const parts: string[] = [];
+    if (provider === "openrouter") {
+      parts.push(
+        `↑ ${formatModelPrice(model.inputPricePerMillion)} / ↓ ${formatModelPrice(
+          model.outputPricePerMillion,
+        )} je 1M`,
+      );
+    }
+    if (model.contextWindow) {
+      parts.push(
+        `${Math.round(model.contextWindow / 1024)}k Kontext${
+          model.maximumContextWindow && model.maximumContextWindow > model.contextWindow
+            ? ` effektiv / ${Math.round(model.maximumContextWindow / 1024)}k Modellmaximum`
+            : ""
+        }`,
+      );
+    }
+    return parts.join(" · ");
+  }
 
   return (
-    <div className="model-picker">
-      <label>
-        <span>Modell suchen</span>
-        <div className="search-input">
-          <Search size={16} />
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            onFocus={() => setLoadRequested(true)}
-            placeholder="Name oder ID"
-          />
-        </div>
-      </label>
-      <label htmlFor={`model-${provider}`}>
-        <span>Verfügbares Modell</span>
-      </label>
-      <select
-        id={`model-${provider}`}
-        value={value}
-        disabled={loading || models.length === 0}
-        onFocus={() => setLoadRequested(true)}
-        onChange={(event) => onChange(event.target.value)}
+    <div className="model-picker flex min-w-0 flex-col gap-1.5">
+      <Label htmlFor={`model-${provider}`}>Modell</Label>
+      <Popover
+        open={open}
+        onOpenChange={(nextOpen) => {
+          setOpen(nextOpen);
+          if (nextOpen) setLoadRequested(true);
+        }}
       >
-        {visibleModels.map((model) => (
-          <option value={model.id} key={model.id}>
-            {model.name}
-            {provider === "openrouter"
-              ? ` · ↑ ${formatModelPrice(model.inputPricePerMillion)} / ↓ ${formatModelPrice(
-                  model.outputPricePerMillion,
-                )} je 1M`
-              : ""}
-            {model.contextWindow
-              ? ` · ${Math.round(model.contextWindow / 1024)}k Kontext${
-                  model.maximumContextWindow && model.maximumContextWindow > model.contextWindow
-                    ? ` effektiv / ${Math.round(model.maximumContextWindow / 1024)}k Modellmaximum`
-                    : ""
-                }`
-              : ""}
-          </option>
-        ))}
-      </select>
-      {!loadRequested && (
-        <button
-          className="button button--quiet"
-          type="button"
-          onClick={() => setLoadRequested(true)}
+        <PopoverTrigger
+          render={
+            <Button
+              id={`model-${provider}`}
+              variant="outline"
+              role="combobox"
+              aria-expanded={open}
+              className="search-input w-full justify-between font-normal"
+            />
+          }
         >
-          Modelle dieses Anbieters prüfen
-        </button>
+          <span className="flex min-w-0 items-center gap-2">
+            <Search className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">
+              {loading
+                ? "Modelle werden geladen …"
+                : (selectedModel?.name ?? (value || "Modell wählen"))}
+            </span>
+          </span>
+          <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+        </PopoverTrigger>
+        <PopoverContent className="w-80 p-0" align="start">
+          <Command>
+            <CommandInput placeholder="Name oder ID" />
+            <CommandList>
+              <CommandEmpty>
+                {loading ? "Modelle werden geladen …" : "Kein Modell gefunden."}
+              </CommandEmpty>
+              <CommandGroup>
+                {models.map((model) => {
+                  const meta = modelMeta(model);
+                  return (
+                    <CommandItem
+                      key={model.id}
+                      value={`${model.name} ${model.id}`}
+                      onSelect={() => {
+                        onChange(model.id);
+                        setOpen(false);
+                      }}
+                    >
+                      <div className="flex min-w-0 flex-col">
+                        <span className="truncate">{model.name}</span>
+                        {meta && (
+                          <span className="truncate text-xs text-muted-foreground">{meta}</span>
+                        )}
+                      </div>
+                      <Check
+                        className={cn(
+                          "ml-auto shrink-0",
+                          value === model.id ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+      {selectedModel && modelMeta(selectedModel) && (
+        <p className="text-xs text-muted-foreground">{modelMeta(selectedModel)}</p>
       )}
-      {loading && <small>Modelle werden geladen …</small>}
       {provider === "aibox" && !loading && !loadError && (
-        <small>
+        <p className="text-xs text-muted-foreground">
           Nur textfähige Modelle; Thinking wird bei kompatiblen Modellen automatisch auf hoch
           gesetzt.
-        </small>
+        </p>
       )}
       {provider === "openrouter" && !loading && !loadError && (
-        <small>↑ Eingabe · ↓ Ausgabe · aktuelle OpenRouter-Preise pro 1 Mio. Token.</small>
+        <p className="text-xs text-muted-foreground">
+          ↑ Eingabe · ↓ Ausgabe · aktuelle OpenRouter-Preise pro 1 Mio. Token.
+        </p>
       )}
-      {loadError && <small className="not-configured">Modelle nicht verfügbar: {loadError}</small>}
+      {loadError && (
+        <p className="text-xs text-destructive">Modelle nicht verfügbar: {loadError}</p>
+      )}
       {replacedModel && (
-        <small className="model-replaced">
+        <p className="text-xs text-amber-700 dark:text-amber-400">
           „{replacedModel}“ ist nicht mehr verfügbar. Ein verfügbares Modell wurde ausgewählt.
-        </small>
+        </p>
       )}
     </div>
   );
