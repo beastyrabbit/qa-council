@@ -27,7 +27,7 @@ export function defaultSchedulerLimits(): SchedulerLimits {
       aibox: integerEnv("AIBOX_RUN_SLOTS", 1),
     },
     inference: {
-      codex: integerEnv("CODEX_INFERENCE_SLOTS", 6),
+      codex: integerEnv("CODEX_INFERENCE_SLOTS", 3),
       openrouter: integerEnv("OPENROUTER_INFERENCE_SLOTS", 6),
       aibox: integerEnv("AIBOX_INFERENCE_SLOTS", 2),
     },

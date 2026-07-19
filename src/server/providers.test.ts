@@ -33,7 +33,7 @@ describe("Pi-Stage-Ausgabe", () => {
           calls += 1;
           throw new Error("HTTP 408 Request Timeout");
         },
-        { onRetry: (attempt) => retries.push(attempt) },
+        { retryDelaysMs: [0, 0], onRetry: (attempt) => retries.push(attempt) },
       ),
     ).rejects.toThrow("HTTP 408");
 
@@ -65,7 +65,7 @@ describe("Pi-Stage-Ausgabe", () => {
         if (calls === 1) throw new Error("WebSocket error");
         return "ok";
       },
-      { onRetry: (attempt) => retries.push(attempt) },
+      { retryDelaysMs: [0, 0], onRetry: (attempt) => retries.push(attempt) },
     );
 
     expect(result).toBe("ok");

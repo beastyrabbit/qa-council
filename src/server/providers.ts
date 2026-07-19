@@ -444,20 +444,42 @@ export function isRetryableProviderError(error: unknown) {
   return !TERMINAL_PROVIDER_ERROR.test(message) && RETRYABLE_PROVIDER_ERROR.test(message);
 }
 
+const DEFAULT_PROVIDER_RETRY_DELAYS_MS = [2_000, 8_000] as const;
+
+async function waitForProviderRetry(delayMs: number, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  if (delayMs <= 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, delayMs);
+    const abort = () => {
+      clearTimeout(timeout);
+      reject(signal?.reason ?? new DOMException("Vorgang abgebrochen.", "AbortError"));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
 export async function withProviderRetries<T>(
   task: () => Promise<T>,
   options: {
     signal?: AbortSignal;
-    onRetry?: (attempt: number, error: unknown) => void;
+    retryDelaysMs?: readonly number[];
+    onRetry?: (attempt: number, error: unknown, delayMs: number) => void;
   } = {},
 ) {
+  const retryDelaysMs = options.retryDelaysMs ?? DEFAULT_PROVIDER_RETRY_DELAYS_MS;
   for (let retry = 0; ; retry += 1) {
     try {
       return await task();
     } catch (error) {
       options.signal?.throwIfAborted();
-      if (retry >= 2 || !isRetryableProviderError(error)) throw error;
-      options.onRetry?.(retry + 1, error);
+      const delayMs = retryDelaysMs[retry];
+      if (delayMs === undefined || !isRetryableProviderError(error)) throw error;
+      options.onRetry?.(retry + 1, error, delayMs);
+      await waitForProviderRetry(delayMs, options.signal);
     }
   }
 }
@@ -724,12 +746,12 @@ export async function runPiStage(options: RunPiStageOptions): Promise<PiStageRes
   }
   return withProviderRetries(() => runPiStageAttempt(options), {
     signal: options.signal,
-    onRetry: (attempt, error) => {
+    onRetry: (attempt, error, delayMs) => {
       const reason = error instanceof Error ? error.message : String(error);
       options.onEvent?.({
         type: "provider_retry",
-        message: `Provider-Anfrage wird nach einem vorübergehenden Fehler erneut versucht (${attempt}/2)`,
-        data: { attempt, maxRetries: 2, reason },
+        message: `Provider-Anfrage wird nach einem vorübergehenden Fehler in ${Math.round(delayMs / 1_000)} Sekunden erneut versucht (${attempt}/2)`,
+        data: { attempt, maxRetries: 2, delayMs, reason },
       });
     },
   });

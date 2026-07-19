@@ -48,7 +48,7 @@ docker compose up --build
 | `PI_INFERENCE_TIMEOUT_MS` | `900000` | Zeitlimit einer Pi-Inferenz |
 | `RUN_SLOTS` | `3` | global gleichzeitig aktive Läufe |
 | `CODEX_RUN_SLOTS` / `OPENROUTER_RUN_SLOTS` / `AIBOX_RUN_SLOTS` | `2` / `2` / `1` | providerbezogene Run-Limits |
-| `CODEX_INFERENCE_SLOTS` / `OPENROUTER_INFERENCE_SLOTS` / `AIBOX_INFERENCE_SLOTS` | `6` / `6` / `2` | providerbezogene Inference-Limits |
+| `CODEX_INFERENCE_SLOTS` / `OPENROUTER_INFERENCE_SLOTS` / `AIBOX_INFERENCE_SLOTS` | `3` / `6` / `2` | providerbezogene Inference-Limits; Codex bleibt unter der beobachteten Kapazitätsgrenze |
 | `OPENROUTER_API_KEY` | nicht gesetzt | OpenRouter-Zugang |
 | `OPENAI_API_KEY` | nicht gesetzt | Native OpenAI-Bildgenerierung für Codex-Läufe |
 | `SETTINGS_ENCRYPTION_KEY` | lokales Schlüssel-File | Schlüsselmaterial für gespeicherte Provider-Keys |

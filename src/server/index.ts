@@ -53,6 +53,19 @@ import { safeParse } from "./safe-json.js";
 import type { RunScheduler } from "./scheduler.js";
 import { sha256 } from "./skills.js";
 
+function packageVersion() {
+  try {
+    const packageJson = JSON.parse(
+      fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+    ) as { version?: unknown };
+    return typeof packageJson.version === "string" ? packageJson.version : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+const APP_VERSION = packageVersion();
+
 export interface AppServices {
   enqueueRun: typeof enqueueRun;
   cancelRun: typeof cancelRun;
@@ -159,7 +172,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   app.get("/api/health", async () => ({
     ok: true,
-    version: "0.4.3",
+    version: APP_VERSION,
     schemaVersion: SCHEMA_VERSION,
   }));
 

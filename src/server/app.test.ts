@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDatabase, type SqliteDatabase, withDatabase } from "./db/index.js";
@@ -45,7 +46,7 @@ function seed() {
 }
 
 describe("buildApp", () => {
-  it("liefert Health 0.4.3 und hält große Inhalte aus der Summary fern", async () => {
+  it("liefert die Paketversion und hält große Inhalte aus der Summary fern", async () => {
     const db = seed();
     app = await buildApp({
       db,
@@ -53,7 +54,11 @@ describe("buildApp", () => {
       services: { enqueueRun: vi.fn(() => true) },
     });
     const health = await app.inject({ method: "GET", url: "/api/health" });
-    expect(health.json()).toEqual({ ok: true, version: "0.4.3", schemaVersion: 4 });
+    expect(health.json()).toEqual({
+      ok: true,
+      version: JSON.parse(readFileSync("package.json", "utf8")).version,
+      schemaVersion: 4,
+    });
 
     const summary = await app.inject({ method: "GET", url: "/api/runs/run?attempt=1" });
     expect(summary.statusCode).toBe(200);
