@@ -12,6 +12,72 @@
   --qa-radius: 9px;
 }
 
+/* Report-Oberflächen tragen ihren eigenen Token-Satz samt Typografie-Pins, damit
+   serverseitig gerendertes Report-HTML (auch im PDF-Export über pdf.ts) unabhängig
+   vom App-Theme bleibt. Bewusst VOR den Konsolenregeln: dort überschreiben spätere
+   gleichspezifische Regeln die Pins für den dunklen Terminal-Kontext. */
+.rendered-result,
+.model-output,
+.result-support {
+  --paper: #f8f5ed;
+  --paper-deep: #eee8dc;
+  --ink: #292a26;
+  --muted: #727168;
+  --line: #d7d0c3;
+  --accent: #8b3f2d;
+  --accent-dark: #6e3022;
+  --olive: #576148;
+  --error: #a0382d;
+  color: #292a26;
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+/* Berichte bleiben in beiden Themes helle "Papier"-Flächen. */
+.rendered-result,
+.result-support,
+.file-reader__content {
+  color-scheme: light;
+}
+.dark .rendered-result {
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.55);
+}
+
+/* Restores UA defaults that Tailwind preflight (@layer base) zeroes inside
+   injected report/markdown HTML. Declared after Tailwind's layers, before
+   legacy-report: beats preflight, loses to every legacy-report rule and to
+   un-layered authored report CSS. A no-op wherever Tailwind is absent (PDF). */
+@layer report-defaults {
+  :where(.rendered-result, .model-output) :where(h1, h2, h3, h4, h5, h6) {
+    font-size: revert;
+    font-weight: revert;
+    margin: revert;
+  }
+  :where(.rendered-result, .model-output) :where(p, blockquote, figure, hr, pre, table, dl, dd) {
+    margin: revert;
+  }
+  :where(.rendered-result, .model-output) :where(ol, ul, menu) {
+    list-style: revert;
+    margin: revert;
+    padding: revert;
+  }
+  :where(.rendered-result, .model-output) :where(img, svg, video, canvas) {
+    display: revert;
+  }
+  :where(.rendered-result, .model-output) :where(a) {
+    color: revert;
+    text-decoration: revert;
+  }
+  :where(.rendered-result, .model-output) :where(code, pre, kbd, samp) {
+    font: revert;
+  }
+  :where(.rendered-result, .model-output) :where(b, strong) {
+    font-weight: revert;
+  }
+  :where(.rendered-result, .model-output) :where(small) {
+    font-size: revert;
+  }
+}
+
 .live-console__stream {
   height: calc(100vh - 340px);
   min-height: 480px;
@@ -206,58 +272,6 @@
   color: #fff8ec;
   background: #302f28;
 }
-.rendered-result,
-.model-output,
-.result-support {
-  --paper: #f8f5ed;
-  --paper-deep: #eee8dc;
-  --ink: #292a26;
-  --muted: #727168;
-  --line: #d7d0c3;
-  --accent: #8b3f2d;
-  --accent-dark: #6e3022;
-  --olive: #576148;
-  --error: #a0382d;
-  color: #292a26;
-  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
-}
-
-/* Restores UA defaults that Tailwind preflight (@layer base) zeroes inside
-   injected report/markdown HTML. Declared after Tailwind's layers, before
-   legacy-report: beats preflight, loses to every legacy-report rule and to
-   un-layered authored report CSS. A no-op wherever Tailwind is absent (PDF). */
-@layer report-defaults {
-  :where(.rendered-result, .model-output) :where(h1, h2, h3, h4, h5, h6) {
-    font-size: revert;
-    font-weight: revert;
-    margin: revert;
-  }
-  :where(.rendered-result, .model-output) :where(p, blockquote, figure, hr, pre, table, dl, dd) {
-    margin: revert;
-  }
-  :where(.rendered-result, .model-output) :where(ol, ul, menu) {
-    list-style: revert;
-    margin: revert;
-    padding: revert;
-  }
-  :where(.rendered-result, .model-output) :where(img, svg, video, canvas) {
-    display: revert;
-  }
-  :where(.rendered-result, .model-output) :where(a) {
-    color: revert;
-    text-decoration: revert;
-  }
-  :where(.rendered-result, .model-output) :where(code, pre, kbd, samp) {
-    font: revert;
-  }
-  :where(.rendered-result, .model-output) :where(b, strong) {
-    font-weight: revert;
-  }
-  :where(.rendered-result, .model-output) :where(small) {
-    font-size: revert;
-  }
-}
-
 .rendered-result {
   width: min(1040px, calc(100% - 40px));
   margin: 32px auto;

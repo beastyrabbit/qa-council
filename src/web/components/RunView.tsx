@@ -13,7 +13,16 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type FormEvent,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,9 +44,13 @@ import { cn } from "@/lib/utils";
 import type { RunDetails, RunEvent, RunStatus } from "../../shared/types";
 import { api } from "../lib/api";
 import { RunStatus as Status } from "./RunStatus";
-import { RunWorkflowGraph } from "./RunWorkflowGraph";
 import { SanitizedMarkdown } from "./SanitizedMarkdown";
 import { ConfirmDialog, type ConfirmRequest, formatSize, PROVIDER_NAMES } from "./ViewShared";
+
+// React Flow ist nur auf Laufseiten nötig; per Lazy-Split bleibt es aus dem Hauptbundle.
+const RunWorkflowGraph = lazy(() =>
+  import("./RunWorkflowGraph").then((module) => ({ default: module.RunWorkflowGraph })),
+);
 
 export const SYSTEM_EVENTS = new Set([
   "run_started",
@@ -469,12 +482,18 @@ export function RunView({
               </CardContent>
             </Card>
 
-            <RunWorkflowGraph
-              stages={details.stages}
-              roles={roles}
-              selectedStageId={selectedStageId}
-              onSelectStage={setSelectedStageId}
-            />
+            <Suspense
+              fallback={
+                <div className="h-[460px] w-full animate-pulse rounded-xl border bg-card" />
+              }
+            >
+              <RunWorkflowGraph
+                stages={details.stages}
+                roles={roles}
+                selectedStageId={selectedStageId}
+                onSelectStage={setSelectedStageId}
+              />
+            </Suspense>
 
             <div className="run-layout grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
               <Card className="live-console gap-0 overflow-hidden py-0">

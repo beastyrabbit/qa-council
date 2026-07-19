@@ -6,6 +6,19 @@
     <meta name="theme-color" content="#ffffff" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>QA Council</title>
+    <script>
+      // FOUC-Schutz: Theme vor dem ersten Paint anwenden (localStorage > OS-Praeferenz).
+      (() => {
+        const stored = localStorage.getItem("theme");
+        const dark =
+          stored === "dark" ||
+          (stored !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", dark);
+        document
+          .querySelector('meta[name="theme-color"]')
+          ?.setAttribute("content", dark ? "#1c1b17" : "#ffffff");
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

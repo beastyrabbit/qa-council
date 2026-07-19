@@ -4,14 +4,24 @@ import {
   FlaskConical,
   FolderOpen,
   type LucideIcon,
+  MonitorCog,
+  Moon,
   Newspaper,
   Settings,
   Sheet,
+  Sun,
   WifiOff,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Sidebar,
   SidebarContent,
@@ -55,6 +65,7 @@ import { FileReader } from "./components/FileReader";
 import { ConfirmDialog, type ConfirmRequest } from "./components/ViewShared";
 import { DocumentsListView, ReviewComposerView, RunsListView } from "./components/WorkspaceViews";
 import { api } from "./lib/api";
+import { type ThemePreference, useThemePreference } from "./lib/theme";
 
 type MainView = "review" | "documents" | "runs" | "tests" | "archive" | "settings";
 
@@ -135,16 +146,54 @@ const NAV_GROUPS: {
 
 const ACTIVE_RUN_STATUSES = new Set(["queued", "running", "cancelling", "waiting_for_input"]);
 
+const THEME_OPTIONS: { value: ThemePreference; label: string; icon: LucideIcon }[] = [
+  { value: "light", label: "Hell", icon: Sun },
+  { value: "dark", label: "Dunkel", icon: Moon },
+  { value: "system", label: "System", icon: MonitorCog },
+];
+
+function ThemeToggle({
+  preference,
+  onChange,
+}: {
+  preference: ThemePreference;
+  onChange: (preference: ThemePreference) => void;
+}) {
+  const current = THEME_OPTIONS.find((option) => option.value === preference) ?? THEME_OPTIONS[2];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button variant="outline" size="sm" className="w-full justify-start" aria-label="Theme" />
+        }
+      >
+        <current.icon /> Darstellung: {current.label}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-(--anchor-width)">
+        {THEME_OPTIONS.map((option) => (
+          <DropdownMenuItem key={option.value} onClick={() => onChange(option.value)}>
+            <option.icon /> {option.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function AppSidebar({
   view,
   runs,
   navigateView,
   openRun,
+  themePreference,
+  onThemeChange,
 }: {
   view: MainView;
   runs: RunRecord[];
   navigateView: (view: MainView) => void;
   openRun: (id: string) => void;
+  themePreference: ThemePreference;
+  onThemeChange: (preference: ThemePreference) => void;
 }) {
   const { setOpenMobile } = useSidebar();
   const activeRuns = runs.filter((run) => !run.archivedAt && ACTIVE_RUN_STATUSES.has(run.status));
@@ -235,7 +284,8 @@ function AppSidebar({
           </SidebarGroup>
         )}
       </SidebarContent>
-      <SidebarFooter>
+      <SidebarFooter className="gap-3">
+        <ThemeToggle preference={themePreference} onChange={onThemeChange} />
         <p className="px-2 text-xs text-muted-foreground">
           Skill-Quellen werden bei jedem Lauf hash-geprüft.
         </p>
@@ -250,6 +300,11 @@ export function App() {
   const [connectionLost, setConnectionLost] = useState(false);
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
   const settingsDirtyRef = useRef(false);
+  const {
+    preference: themePreference,
+    setPreference: setThemePreference,
+    resolved: resolvedTheme,
+  } = useThemePreference();
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [comparisons, setComparisons] = useState<ComparisonRecord[]>([]);
@@ -602,7 +657,7 @@ export function App() {
 
   const overlays = (
     <>
-      <Toaster position="bottom-right" />
+      <Toaster position="bottom-right" theme={resolvedTheme} />
       <ConfirmDialog request={confirmRequest} onClose={() => setConfirmRequest(null)} />
       {connectionLost && (
         <div className="fixed bottom-2 left-2 z-50">
@@ -763,7 +818,14 @@ export function App() {
   return (
     <TooltipProvider>
       <SidebarProvider>
-        <AppSidebar view={view} runs={runs} navigateView={navigateView} openRun={openRun} />
+        <AppSidebar
+          view={view}
+          runs={runs}
+          navigateView={navigateView}
+          openRun={openRun}
+          themePreference={themePreference}
+          onThemeChange={setThemePreference}
+        />
         <SidebarInset className="min-w-0">
           <header className="flex h-12 items-center gap-2 border-b px-4 md:hidden">
             <SidebarTrigger />

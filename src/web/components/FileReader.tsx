@@ -164,16 +164,16 @@ export function FileReader({
             </div>
           </ScrollArea>
         </nav>
-        <main className="file-reader__content min-w-0 p-5 lg:p-8">
+        <main className="file-reader__content min-w-0 bg-[#f8f5ed] p-5 text-[#292a26] lg:p-8">
           {content ? (
             <>
               <header className="mb-5 flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <span className="block text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
+                  <span className="block text-[10px] font-semibold tracking-widest text-[#727168] uppercase">
                     {content.phase}
                   </span>
                   <h1 className="mt-0.5 font-heading text-xl font-bold">{content.title}</h1>
-                  <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                  <p className="mt-0.5 font-mono text-xs text-[#727168]">
                     Versuch {content.originAttempt} · {content.sha256.slice(0, 12)}
                   </p>
                 </div>
@@ -181,6 +181,7 @@ export function FileReader({
                   <Button
                     variant="ghost"
                     size="sm"
+                    className="text-[#44403c] hover:bg-black/5 hover:text-[#292a26]"
                     onClick={() => {
                       void navigator.clipboard.writeText(content.content ?? "");
                       toast.success("Inhalt kopiert.");
@@ -191,6 +192,7 @@ export function FileReader({
                   <Button
                     variant="outline"
                     size="sm"
+                    className="border-[#d7d0c3] text-[#44403c] hover:bg-black/5 hover:text-[#292a26] dark:bg-transparent"
                     render={<a href={`/api/runs/${runId}/files/${content.id}?download=1`} />}
                   >
                     <Download /> Download
@@ -200,7 +202,7 @@ export function FileReader({
               {content.contentHtml ? (
                 <SanitizedMarkdown html={content.contentHtml} />
               ) : (
-                <pre className="overflow-auto rounded-lg border bg-muted/30 p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+                <pre className="overflow-auto rounded-lg border border-[#d7d0c3] bg-white/50 p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap">
                   {content.content}
                 </pre>
               )}
