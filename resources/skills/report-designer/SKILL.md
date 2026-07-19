@@ -69,9 +69,10 @@ kleiner Nachweiszeile. Es führt zur finalen Entscheidung; es ist weder Abo-Werb
 erfundener Workflowstatus. Wiederverwenden nur, wenn ein echter interner Ziel-Link vorhanden ist.
 
 Eine weiche radiale Messing-Lichtinsel hinter Masthead oder Hero und sehr leise, rein mit CSS
-erzeugte Papier-/Samtstruktur sind erwünscht. Web-Motion bleibt dezent: Licht an, sanftes
-Einblenden und ein kaum merkliches Pendeln des Prüfzugangs. `prefers-reduced-motion` muss jede
-Animation abschalten. Unterseiten bleiben eigenständig, ruhig und gut lesbar.
+erzeugte Papier-/Samtstruktur sind erwünscht. Unterseiten und ihre Inhalte erscheinen ohne
+Fade-in und bleiben dauerhaft sichtbar. Nur der Prüfzugang darf kaum merklich pendeln.
+`prefers-reduced-motion` muss jede Animation abschalten. Unterseiten bleiben eigenständig, ruhig
+und gut lesbar.
 
 ### Visual Report
 
@@ -155,7 +156,9 @@ sind nicht erlaubt, weil `styles.css` absichtlich schreibgeschützt ist:
   `news-teaser__number`, `news-score`, `news-score--critical`, `news-feature`, `news-pass`,
   `news-pass__clip`, `news-pass__eyebrow`
 - Zeitung Inhalt: `news-card`, `news-kicker`, `news-summary`, `news-pullquote`, `news-list`,
-  `news-data`, `news-priority`, `news-evidence`, `news-byline`
+  `news-data`, `news-priority`, `news-evidence`, `news-byline`, `news-article`,
+  `news-article__header`, `news-article__body`, `news-article__lede`,
+  `news-article__aside`, `news-article__figure`, `news-article__footer`
 - Visual Report Hülle: `onepaper-sheet`, `onepaper-title`, `onepaper-content`,
   `onepaper-footer`, `visual-report`, `visual-hero`, `visual-chat-header`, `visual-avatar`,
   `visual-online`, `visual-section`
@@ -170,17 +173,24 @@ sind nicht erlaubt, weil `styles.css` absichtlich schreibgeschützt ist:
   `visual-callout`, `visual-evidence`, `visual-image`, `visual-image--dark`,
   `visual-image-thread`, `visual-caption`, `visual-spark`, `visual-emote-grid`
 
-Bewahre jeden Bild-Hook aus `report.ts` exakt einmal im HTML. Die Zeitung nutzt mindestens
-`{{EDITORIAL_IMAGE}}`; der Visual Report nutzt zusätzlich die vorhandenen Evidence- und
-Roadmap-Hooks. Der Server ersetzt sie durch separat erzeugte, dokumentbezogene Motive.
+Bewahre jeden Bild-Hook aus `report.ts` exakt einmal im HTML. Die Zeitung nutzt
+`{{EDITORIAL_IMAGE}}` auf der Titelseite sowie `{{REPORT_IMAGE_RISKS}}` und
+`{{REPORT_IMAGE_ACTIONS}}` in den passenden Artikeln. Der Visual Report nutzt zusätzlich seine
+vorhandenen Evidence- und Roadmap-Hooks. Der Server ersetzt sie durch separat erzeugte,
+dokumentbezogene Motive.
 
 ## Zeitung
 
 Baue eine echte digitale Zeitung mit einer prägnanten Titelseite und fünf eigenständigen
 Ergebnisartikeln: Urteil, Stärken, Risiken und Lücken, nächste Maßnahmen sowie die wichtigsten
 Begründungen/Belege. Die Titelseite priorisiert Gesamturteil, wichtigste Konsequenz, größte Risiken
-und die stärksten Teaser. Unterseiten erklären den jeweiligen Teil des Ergebnisses in
-verständlicher Fachsprache, statt die Titelseite zu wiederholen.
+und die stärksten Teaser. Unterseiten sind redaktionelle Langform, kein Kartenraster: Jeder Artikel
+braucht eine eigenständige Überschrift, Deck, Byline, mindestens fünf inhaltlich gehaltvolle
+Absätze, mindestens zwei erklärende Zwischenüberschriften und einen runden Schluss. Schreibe
+zusammenhängende Fachprosa mit Kontext, Begründung, Auswirkungen und Konsequenz. Listen und
+Seitenkästen dürfen die Prosa ergänzen, aber niemals den Hauptteil ersetzen. Unterseiten erklären
+den jeweiligen Teil des Ergebnisses, statt die Titelseite zu wiederholen oder Befunde nur
+aufzuzählen.
 
 Erzeuge für jeden im Auftrag genannten Slug exakt eine `<page>`. Interne Links beginnen mit
 `__RESULT_BASE__`, zum Beispiel `__RESULT_BASE__/synthese`. Jede Seite muss nach direktem Aufruf

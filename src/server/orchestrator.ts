@@ -82,7 +82,7 @@ export const PHASE_VERSIONS: Record<PipelinePhase, number> = {
   "pro-contra-debate": 1,
   "council-rounds": 1,
   "synthesis-dissent": 2,
-  reports: 2,
+  reports: 3,
 };
 
 interface RunRow {
@@ -2407,7 +2407,10 @@ ${reportSourceMarkdown}`;
 und nächste Handlung. Genau fünf Artikel vertiefen das Ergebnis: Urteil, tragende Stärken,
 Risiken und Lücken, nächste Maßnahmen sowie die Beleggrundlage. Cross-Reviews, Rollen, Debatte,
 Council-Runden und andere interne Prozessschritte sind keine Zeitungsressorts und werden nicht
-als Artikel dargestellt. Bewahre die exakten Farbrollen und großzügigen Leerraum.
+als Artikel dargestellt. Die Unterseiten müssen wie echte redaktionelle Artikel lesbar sein:
+zusammenhängende Fachprosa mit Einstieg, Kontext, Begründung, Auswirkungen, mindestens zwei
+Zwischenüberschriften und Schluss. Listen oder Infokästen ergänzen nur; sie ersetzen niemals den
+Artikelkörper. Bewahre die drei Bild-Hooks, die exakten Farbrollen und großzügigen Leerraum.
 
 ${commonBuilderPrompt}`,
             progress: 92,
@@ -3173,11 +3176,13 @@ export async function generateAdditionalPresentation(runId: string, kind: Presen
 und schreibgeschützt. Bearbeite ausschließlich index.html und report.ts mit read und edit zu
 einer vollständigen ${
           kind === "newspaper"
-            ? "resultatorientierten Tageszeitung mit prägnanter Titelseite und fünf Artikeln"
+            ? "resultatorientierten Tageszeitung mit prägnanter Titelseite und fünf redaktionellen Langform-Artikeln"
             : "kollisionsfreien visuellen HTML-Publikation über Ergebnis, Gründe, Risiken und Maßnahmen"
-        }. Verwende nur die vorhandenen CSS-Klassen. Erfinde keine Fakten. Interne Council-Schritte
-sind kein sichtbares Ressort. report.ts bleibt ein reines Literalmanifest. Antworte nur mit einer
-kurzen Änderungsübersicht.
+        }. Jeder Zeitungsartikel braucht zusammenhängende Fachprosa, mindestens fünf Absätze,
+zwei Zwischenüberschriften und einen Schluss; Listen und Seitenkästen sind nur Ergänzungen.
+Bewahre alle Bild-Hooks. Verwende nur die vorhandenen CSS-Klassen. Erfinde keine Fakten. Interne
+Council-Schritte sind kein sichtbares Ressort. report.ts bleibt ein reines Literalmanifest.
+Antworte nur mit einer kurzen Änderungsübersicht.
 
 FINALES COUNCIL-ERGEBNIS:
   ${reportSourceMarkdown}`,

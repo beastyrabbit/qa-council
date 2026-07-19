@@ -68,7 +68,12 @@ export function DocumentView({
           </strong>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" render={<a href={`/api/documents/${id}/download`} />}>
+          <Button
+            variant="outline"
+            size="sm"
+            nativeButton={false}
+            render={<a href={`/api/documents/${id}/download`} />}
+          >
             <Download /> Original
           </Button>
           <Button size="sm" onClick={() => onReview(id)}>

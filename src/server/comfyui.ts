@@ -420,8 +420,8 @@ export async function getOrCreateEditorialImage(options: {
   const prompt = editorialImagePrompt(options.documentName, options.summary);
   options.onEvent?.({
     type: "image_generation_started",
-    message: "ComfyUI erzeugt das redaktionelle Titelbild",
-    data: { checkpoint: config.checkpoint },
+    message: `ComfyUI erzeugt das redaktionelle Reportbild „${slot}“`,
+    data: { checkpoint: config.checkpoint, slot },
   });
   const generated = await generateComfyUiImage({
     config,
@@ -455,8 +455,8 @@ export async function getOrCreateEditorialImage(options: {
     );
   options.onEvent?.({
     type: "image_generation_completed",
-    message: "ComfyUI-Titelbild wurde gespeichert",
-    data: { imageId: id, promptId: generated.remotePromptId, bytes: generated.data.length },
+    message: `ComfyUI-Reportbild „${slot}“ wurde gespeichert`,
+    data: { imageId: id, promptId: generated.remotePromptId, bytes: generated.data.length, slot },
   });
   return id;
 }

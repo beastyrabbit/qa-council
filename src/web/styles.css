@@ -286,6 +286,17 @@
   background: transparent;
   box-shadow: none;
 }
+/*
+ * Persisted authored reports may contain one-shot reveal animations. Result pages are long-lived
+ * readers, so their content must never disappear again when surrounding application state updates.
+ */
+.rendered-result--authored.rendered-result--authored .result--newspaper::before,
+.rendered-result--authored.rendered-result--authored .result--newspaper .news-layout,
+.rendered-result--authored.rendered-result--authored .result--newspaper .news-layout > * {
+  opacity: 1;
+  transform: none;
+  animation: none;
+}
 @scope (.rendered-result:not(.rendered-result--authored)) {
   .result {
     color: #252521;

@@ -344,6 +344,10 @@ export function App() {
 
   useEffect(() => {
     void load().catch((reason) => setMessage(reason.message));
+  }, [load]);
+
+  useEffect(() => {
+    if (resultId || (fileRunId && artifactId)) return;
     const timer = window.setInterval(() => {
       void Promise.all([
         api<DocumentRecord[]>("/api/documents"),
@@ -359,7 +363,7 @@ export function App() {
         .catch(() => setConnectionLost(true));
     }, 2_000);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [artifactId, fileRunId, resultId]);
 
   useEffect(() => {
     if (window.location.pathname === "/") {

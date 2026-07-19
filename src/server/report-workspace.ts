@@ -11,7 +11,7 @@ export interface NewspaperPageTemplate {
 }
 
 export interface ReportManifest {
-  version: 1;
+  version: 2;
   kind: ReportWorkspaceKind;
   documentName: string;
   title: string;
@@ -175,7 +175,7 @@ function manifestSource(manifest: ReportManifest) {
  * Erlaubt ist genau dieses exportierte Objekt mit einfachen Literalwerten.
  */
 export const reportManifest = {
-  version: 1,
+  version: ${manifest.version},
   kind: ${escapeTsString(manifest.kind)},
   documentName: ${escapeTsString(manifest.documentName)},
   title: ${escapeTsString(manifest.title)},
@@ -224,35 +224,53 @@ function newspaperHtml(documentName: string, pages: NewspaperPageTemplate[]) {
     },
   };
   const pageMarkup = pages
-    .map((page, index) => {
+    .map((page) => {
       const intent = articleIntents[page.slug] ?? {
         kicker: page.title,
         headline: `${escapeHtml(page.title)} im <em>Detail</em>`,
         summary: "Den fachlichen Teil des finalen Ergebnisses verständlich erklären.",
       };
+      const articleImage =
+        page.slug === "risiken"
+          ? `<figure class="news-article__figure">
+      {{REPORT_IMAGE_RISKS}}
+      <figcaption class="news-byline">Die entscheidenden Risiken als dokumentbezogenes Editorialmotiv</figcaption>
+    </figure>`
+          : page.slug === "massnahmen"
+            ? `<figure class="news-article__figure">
+      {{REPORT_IMAGE_ACTIONS}}
+      <figcaption class="news-byline">Die priorisierte Umsetzungsroute als dokumentbezogenes Editorialmotiv</figcaption>
+    </figure>`
+            : "";
       return `<page slug="${escapeHtml(page.slug)}" title="${escapeHtml(page.title)}">
-  <article class="news-layout ${index % 2 ? "news-layout--sidebar" : "news-layout--columns"}">
-    <header class="news-wide news-section-head">
+  <article class="news-article">
+    <header class="news-article__header news-section-head">
       <span class="news-kicker">${intent.kicker}</span>
       <h1>${intent.headline}</h1>
       <p class="news-summary">${intent.summary}</p>
+      <span class="news-byline">QA Council · Ergebnisredaktion</span>
     </header>
-    <section class="news-block">
-      <span class="news-kicker">In Klartext</span>
-      <h2>Was das Ergebnis konkret bedeutet</h2>
-      <p>Den wichtigsten Befund dieses Artikels erklären, statt den Prüfprozess nachzuerzählen.</p>
-    </section>
-    <aside class="news-card">
+    ${articleImage}
+    <div class="news-article__body">
+      <p class="news-article__lede">Den wichtigsten Befund dieses Artikels in einem eigenständigen, verständlichen Einstieg erklären.</p>
+      <p>Den Kontext, die Tragweite und die entscheidende Begründung aus der finalen Synthese in zusammenhängender Prosa erläutern.</p>
+      <h2>Warum dieser Befund zählt</h2>
+      <p>Die fachlichen Zusammenhänge, Auswirkungen und Abhängigkeiten erklären, ohne den internen Prüfprozess nachzuerzählen.</p>
+      <p>Wichtige Einschränkungen und verbleibende Unsicherheit fair einordnen und klar von bestätigten Aussagen trennen.</p>
+      <h2>Was daraus folgt</h2>
+      <p>Die konkrete Konsequenz für Entscheidung, Umsetzung oder weitere Prüfung nachvollziehbar herleiten.</p>
+    </div>
+    <aside class="news-article__aside">
       <span class="news-kicker">Auf einen Blick</span>
       <h2>Die entscheidenden Punkte</h2>
-      <ol class="news-list">
+      <ul class="news-list">
         <li>Erste konkrete Aussage aus der finalen Synthese einsetzen.</li>
         <li>Zweite konkrete Aussage samt Auswirkung einsetzen.</li>
-      </ol>
+      </ul>
     </aside>
-    <blockquote class="news-pullquote">
-      <span>Eine kurze, prägnante Kernaussage des Ergebnisses einsetzen.</span>
-    </blockquote>
+    <footer class="news-article__footer">
+      <p>Eine kurze Schlussfolgerung formulieren, die den Artikel abrundet und zur nächsten relevanten Seite führt.</p>
+    </footer>
   </article>
 </page>`;
     })
@@ -346,7 +364,6 @@ const NEWSPAPER_CSS = `:root {
   pointer-events: none;
   opacity: 0.85;
   background: radial-gradient(circle, rgba(198, 154, 88, 0.24), transparent 67%);
-  animation: news-lights 1.2s ease-out both;
 }
 
 .result--newspaper::after {
@@ -465,17 +482,7 @@ const NEWSPAPER_CSS = `:root {
   gap: clamp(2.5rem, 6vw, 6.5rem);
   min-width: 0;
   padding: clamp(3.5rem, 8vw, 8rem) clamp(1.25rem, 7vw, 7rem);
-  animation: news-rise 700ms ease-out both;
 }
-
-.news-layout > * {
-  animation: news-rise 650ms ease-out both;
-}
-
-.news-layout > :nth-child(2) { animation-delay: 90ms; }
-.news-layout > :nth-child(3) { animation-delay: 170ms; }
-.news-layout > :nth-child(4) { animation-delay: 250ms; }
-.news-layout > :nth-child(5) { animation-delay: 330ms; }
 
 .news-layout--lead { grid-template-columns: minmax(0, 1fr); }
 .news-layout--lead { padding-top: clamp(4.5rem, 10vw, 10rem); }
@@ -596,6 +603,90 @@ const NEWSPAPER_CSS = `:root {
   max-width: 64rem;
   padding-bottom: clamp(1rem, 3vw, 2.5rem);
   border-bottom: 1px solid rgba(198, 154, 88, 0.46);
+}
+
+.news-article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(15rem, 0.34fr);
+  gap: clamp(2.25rem, 5vw, 5rem);
+  max-width: 76rem;
+  margin: 0 auto;
+  padding: clamp(3.5rem, 8vw, 7rem) clamp(1.25rem, 7vw, 6rem);
+}
+
+.news-article__header,
+.news-article__figure,
+.news-article__footer {
+  grid-column: 1 / -1;
+}
+
+.news-article__header {
+  max-width: 68rem;
+}
+
+.news-article__header .news-byline {
+  margin-top: 1.5rem;
+}
+
+.news-article__body {
+  max-width: 48rem;
+  color: var(--news-cream);
+  font: 400 1.1rem/1.85 Georgia, "Times New Roman", serif;
+}
+
+.news-article__body p {
+  margin: 0 0 1.35em;
+}
+
+.news-article__body h2 {
+  margin: 2.1em 0 0.7em;
+  color: var(--news-cream);
+  font-size: clamp(1.75rem, 3vw, 2.55rem);
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  line-height: 1.08;
+}
+
+.news-article__lede {
+  color: var(--news-muted);
+  font-size: clamp(1.3rem, 2.4vw, 1.65rem);
+  line-height: 1.6;
+}
+
+.news-article__aside {
+  align-self: start;
+  padding: 0.25rem 0 0.5rem clamp(1.25rem, 3vw, 2.25rem);
+  border-left: 1px solid rgba(198, 154, 88, 0.62);
+}
+
+.news-article__aside h2 {
+  margin: 0.6rem 0 1.25rem;
+  font-size: 1.55rem;
+  font-weight: 400;
+  line-height: 1.15;
+}
+
+.news-article__figure {
+  margin: 0;
+  padding: 0.55rem;
+  border: 1px solid var(--news-brass);
+  background: rgba(44, 74, 60, 0.55);
+  box-shadow: 0 1.5rem 3.5rem var(--news-shadow);
+}
+
+.news-article__figure img {
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  display: block;
+  object-fit: cover;
+}
+
+.news-article__footer {
+  max-width: 48rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(198, 154, 88, 0.42);
+  color: var(--news-muted);
+  font: italic 1rem/1.65 Georgia, "Times New Roman", serif;
 }
 
 .news-section-head h1 {
@@ -770,16 +861,6 @@ const NEWSPAPER_CSS = `:root {
   color: var(--news-cream);
 }
 
-@keyframes news-rise {
-  from { opacity: 0; transform: translateY(1.25rem); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes news-lights {
-  from { opacity: 0; transform: scale(0.78); }
-  to { opacity: 0.85; transform: scale(1); }
-}
-
 @keyframes news-pass-sway {
   0%, 100% { transform: rotate(-1deg); }
   50% { transform: rotate(1deg); }
@@ -798,6 +879,17 @@ const NEWSPAPER_CSS = `:root {
   .news-layout--split,
   .news-layout--columns,
   .news-layout--sidebar { grid-template-columns: minmax(0, 1fr); }
+  .news-article { grid-template-columns: minmax(0, 1fr); }
+  .news-article__header,
+  .news-article__figure,
+  .news-article__body,
+  .news-article__aside,
+  .news-article__footer { grid-column: 1; }
+  .news-article__aside {
+    padding: 1.5rem 0 0;
+    border-top: 1px solid rgba(198, 154, 88, 0.62);
+    border-left: 0;
+  }
   .news-teaser-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .news-hero__headline { font-size: clamp(2.7rem, 14vw, 4.8rem); }
   .news-pass { margin-top: 4.5rem; }
@@ -809,9 +901,6 @@ const NEWSPAPER_CSS = `:root {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .result--newspaper::before,
-  .news-layout,
-  .news-layout > *,
   .news-pass { animation: none; }
 }
 
@@ -1621,6 +1710,30 @@ export async function scaffoldReportWorkspace(options: {
   const commonBrief = `Erzeuge eine dokumentbezogene, textfreie Editorial-Illustration zu ${options.documentName}. Zeige das zentrale Qualitätsrisiko und die wichtigste Entscheidung als klare visuelle Metapher; keine Logos, keine Schrift, keine generische Büroaufnahme.`;
   const newspaperBrief = `${commonBrief} Inszeniere das Motiv warm, gedämpft und malerisch wie in einem privaten Backstage-Salon: Flaschengrün, Messinglicht und dunkles Holz, ohne Hochglanz-Stockfoto, Neon oder flache Vektorästhetik.`;
   const visualReportBrief = `${commonBrief} Gestalte es als warmes, hochwertiges Papier-Cutout-Key-Visual für einen „Group Chat“-Entscheidungsreport: Plum Roast auf Oat Cream mit gezielten Coral-, Teal- und Marigold-Akzenten, weich gerundet und gemeinschaftlich, aber nicht kindlich oder meme-artig.`;
+  const newspaperImages: ReportImageSlot[] = [
+    {
+      slot: "editorial",
+      hook: "{{EDITORIAL_IMAGE}}",
+      brief: newspaperBrief,
+      alt: `Editorial-Illustration zum QA-Bericht ${options.documentName}`,
+    },
+  ];
+  if (pages.some((page) => page.slug === "risiken")) {
+    newspaperImages.push({
+      slot: "risks",
+      hook: "{{REPORT_IMAGE_RISKS}}",
+      brief: `${newspaperBrief} Verdichte die wichtigsten dokumentbezogenen Risiken und ihre Folgen in einem horizontalen redaktionellen Motiv mit klarer räumlicher Hierarchie.`,
+      alt: `Redaktionelle Illustration der wichtigsten Risiken aus ${options.documentName}`,
+    });
+  }
+  if (pages.some((page) => page.slug === "massnahmen")) {
+    newspaperImages.push({
+      slot: "actions",
+      hook: "{{REPORT_IMAGE_ACTIONS}}",
+      brief: `${newspaperBrief} Zeige die priorisierten nächsten Schritte als nachvollziehbaren Weg mit Abhängigkeiten und Kontrollpunkten, ohne Text oder UI-Elemente.`,
+      alt: `Redaktionelle Illustration der nächsten Schritte für ${options.documentName}`,
+    });
+  }
   await Promise.all([
     writeTrustedInitialFile(
       path.join(newspaperRoot, "index.html"),
@@ -1630,20 +1743,13 @@ export async function scaffoldReportWorkspace(options: {
     writeTrustedInitialFile(
       path.join(newspaperRoot, "report.ts"),
       manifestSource({
-        version: 1,
+        version: 2,
         kind: "newspaper",
         documentName: options.documentName,
         title: `QA-Tageszeitung · ${options.documentName}`,
         imageBrief: newspaperBrief,
         editorialAlt: `Editorial-Illustration zum QA-Bericht ${options.documentName}`,
-        images: [
-          {
-            slot: "editorial",
-            hook: "{{EDITORIAL_IMAGE}}",
-            brief: newspaperBrief,
-            alt: `Editorial-Illustration zum QA-Bericht ${options.documentName}`,
-          },
-        ],
+        images: newspaperImages,
       }),
     ),
     writeTrustedInitialFile(
@@ -1654,7 +1760,7 @@ export async function scaffoldReportWorkspace(options: {
     writeTrustedInitialFile(
       path.join(visualRoot, "report.ts"),
       manifestSource({
-        version: 1,
+        version: 2,
         kind: "visual-report",
         documentName: options.documentName,
         title: `Visual Report · ${options.documentName}`,
@@ -1832,7 +1938,7 @@ export function parseReportManifest(
       throw new Error(`Manifest-Eigenschaft "${key}" muss eine nicht leere Zeichenkette sein.`);
     }
   }
-  if (record.version !== 1) throw new Error("Manifest-Version muss 1 sein.");
+  if (record.version !== 2) throw new Error("Manifest-Version muss 2 sein.");
   if (record.kind !== "newspaper" && record.kind !== "visual-report") {
     throw new Error("Manifest-kind muss newspaper oder visual-report sein.");
   }
@@ -2189,6 +2295,17 @@ export function validateReportWorkspaceFiles(
     );
   }
   const slugs = pageSlugs(files.newspaper.html);
+  for (const [slug, hook] of [
+    ["risiken", "{{REPORT_IMAGE_RISKS}}"],
+    ["massnahmen", "{{REPORT_IMAGE_ACTIONS}}"],
+  ] as const) {
+    if (!(expectedPageSlugs ?? slugs).includes(slug)) continue;
+    const count = (files.newspaper.html.match(new RegExp(hook.replace(/[{}]/g, "\\$&"), "g")) ?? [])
+      .length;
+    if (count !== 1) {
+      findings.push(`Struktur · Die Zeitung braucht genau einen ${hook}-Hook, gefunden: ${count}.`);
+    }
+  }
   if (slugs.some((slug) => !/^[a-z0-9][a-z0-9-]{0,59}$/.test(slug))) {
     findings.push("Struktur · Jede Zeitungsseite braucht einen gültigen slug.");
   }
@@ -2199,9 +2316,34 @@ export function validateReportWorkspaceFiles(
       findings.push(`Struktur · Zeitungsseite "${slug}" muss genau einmal vorkommen.`);
     }
   }
-  for (const match of files.newspaper.html.matchAll(/<page\s+([^>]+)>[\s\S]*?<\/page>/gi)) {
+  for (const match of files.newspaper.html.matchAll(/<page\s+([^>]+)>([\s\S]*?)<\/page>/gi)) {
     if (!/\btitle\s*=\s*["'][^"']+["']/i.test(match[1])) {
       findings.push("Struktur · Jede Zeitungsseite braucht einen nicht leeren title.");
+    }
+    const pageSlug = match[1].match(/\bslug\s*=\s*(["'])([^"']+)\1/i)?.[2] ?? "unbekannt";
+    const article = match[2];
+    for (const className of ["news-article", "news-article__header", "news-article__body"]) {
+      if (!new RegExp(`class\\s*=\\s*["'][^"']*\\b${className}\\b`, "i").test(article)) {
+        findings.push(
+          `Struktur · Zeitungsartikel "${pageSlug}" braucht die Klasse "${className}".`,
+        );
+      }
+    }
+    const body =
+      article.match(
+        /<([a-z][\w-]*)\b[^>]*class\s*=\s*["'][^"']*\bnews-article__body\b[^"']*["'][^>]*>([\s\S]*?)<\/\1>/i,
+      )?.[2] ?? "";
+    const paragraphCount = (body.match(/<p(?:\s[^>]*)?>[\s\S]*?<\/p>/gi) ?? []).length;
+    if (paragraphCount < 5) {
+      findings.push(
+        `Redaktion · Zeitungsartikel "${pageSlug}" braucht mindestens fünf Absätze, gefunden: ${paragraphCount}.`,
+      );
+    }
+    const subheadingCount = (body.match(/<h2(?:\s[^>]*)?>[\s\S]*?<\/h2>/gi) ?? []).length;
+    if (subheadingCount < 2) {
+      findings.push(
+        `Redaktion · Zeitungsartikel "${pageSlug}" braucht mindestens zwei Zwischenüberschriften, gefunden: ${subheadingCount}.`,
+      );
     }
   }
 

@@ -1,6 +1,6 @@
 /* biome-ignore-all lint/security/noDangerouslySetInnerHtml: Presentation-HTML wird serverseitig per expliziter Allowlist sanitisiert. */
 import { ArrowLeft, CircleX, Copy, Download, ListChecks } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,29 @@ function ReadinessDot({ state }: { state: TabReadiness }) {
   if (state === "building") return <Spinner className="size-3 text-muted-foreground" />;
   return <span className="size-1.5 rounded-full border border-muted-foreground/50" />;
 }
+
+const PresentationPanel = memo(function PresentationPanel({
+  html,
+  authored,
+  kind,
+  presentationId,
+}: {
+  html: string;
+  authored: boolean;
+  kind: PresentationKind;
+  presentationId?: string;
+}) {
+  return (
+    <div
+      id="result-presentation-panel"
+      className={`rendered-result${authored ? " rendered-result--authored" : ""}`}
+      role="tabpanel"
+      aria-labelledby={`result-tab-${kind}`}
+      data-presentation-id={presentationId}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+});
 
 export function ResultView({
   presentationId,
@@ -194,12 +217,18 @@ export function ResultView({
             <Button
               variant="outline"
               size="sm"
+              nativeButton={false}
               render={<a href={`/api/presentations/${presentationId}/pdf`} />}
             >
               <Download /> PDF
             </Button>
           )}
-          <Button variant="outline" size="sm" render={<a href={`/api/runs/${runId}/download`} />}>
+          <Button
+            variant="outline"
+            size="sm"
+            nativeButton={false}
+            render={<a href={`/api/runs/${runId}/download`} />}
+          >
             <Download /> Markdown
           </Button>
         </div>
@@ -264,13 +293,11 @@ export function ResultView({
           </div>
         )}
       {section === "presentation" && renderedHtml && (
-        <div
-          id="result-presentation-panel"
-          className={`rendered-result${hasAuthoredReportStyles ? " rendered-result--authored" : ""}`}
-          role="tabpanel"
-          aria-labelledby={`result-tab-${kind}`}
-          data-presentation-id={presentation?.id}
-          dangerouslySetInnerHTML={{ __html: renderedHtml }}
+        <PresentationPanel
+          html={renderedHtml}
+          authored={hasAuthoredReportStyles}
+          kind={kind}
+          presentationId={presentation?.id}
         />
       )}
       {section === "top10" && (

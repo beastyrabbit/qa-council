@@ -64,6 +64,9 @@ describe("persistenter Report-Arbeitsbereich", () => {
       documentName: "checkout.md",
       newspaperPages: [
         { slug: "urteil", title: "Das Urteil" },
+        { slug: "staerken", title: "Tragende Stärken" },
+        { slug: "risiken", title: "Risiken und Lücken" },
+        { slug: "massnahmen", title: "Nächste Maßnahmen" },
         { slug: "belege", title: "Warum das Urteil trägt" },
       ],
     });
@@ -73,11 +76,18 @@ describe("persistenter Report-Arbeitsbereich", () => {
     expect(files.newspaper.html).toContain("<newspaper>");
     expect(files.newspaper.html).toContain('slug="urteil"');
     expect(files.newspaper.html).toContain('class="news-pass"');
+    expect(files.newspaper.html).toContain('class="news-article__body"');
+    expect(files.newspaper.html).toContain("{{REPORT_IMAGE_RISKS}}");
+    expect(files.newspaper.html).toContain("{{REPORT_IMAGE_ACTIONS}}");
     expect(files.newspaper.css).toContain(".news-hero__headline");
+    expect(files.newspaper.css).toContain(".news-article__body");
+    expect(files.newspaper.css).not.toContain("@keyframes news-rise");
     expect(files.newspaper.css).toContain("--news-pine: #1f362c");
     expect(files.newspaper.css).toContain("--news-ember: #d9704f");
     expect(files.newspaper.css).toContain("@media (prefers-reduced-motion: reduce)");
     expect(files.newspaper.manifest).toContain("export const reportManifest");
+    expect(files.newspaper.manifest).toContain("version: 2");
+    expect(parseReportManifest(files.newspaper.manifest, "newspaper").images).toHaveLength(3);
     expect(files.visualReport.html).toContain("visual-matrix");
     expect(files.visualReport.html).toContain('class="visual-composer"');
     expect(files.visualReport.css).toContain(".visual-chart");
@@ -240,7 +250,7 @@ describe("statisches TypeScript-Manifest", () => {
   it("liest ausschließlich ein exportiertes Literal per AST", () => {
     const manifest = parseReportManifest(
       `export const reportManifest = {
-        version: 1,
+        version: 2,
         kind: "newspaper",
         documentName: "review.md",
         title: "QA Report",
@@ -263,7 +273,7 @@ describe("statisches TypeScript-Manifest", () => {
   it.each([
     `fetch("https://example.test"); export const reportManifest = {};`,
     `export const reportManifest = makeManifest();`,
-    `export const reportManifest = { version: 1, kind: "newspaper", documentName: "x", title: "x", imageBrief: process.env.SECRET, editorialAlt: "x" } as const;`,
+    `export const reportManifest = { version: 2, kind: "newspaper", documentName: "x", title: "x", imageBrief: process.env.SECRET, editorialAlt: "x" } as const;`,
     `export function run() { return "x"; }`,
   ])("führt Agent-Code niemals aus und weist nicht-literalisches TS zurück", (source) => {
     expect(() => parseReportManifest(source)).toThrow();

@@ -430,8 +430,8 @@ export function SettingsView({
         <CardHeader>
           <CardTitle className="font-heading">ComfyUI-Bilder</CardTitle>
           <CardDescription>
-            Lokales Titelbild für die AI Box und Rückfall für OpenRouter-Modelle ohne native
-            Bildausgabe. Codex verwendet ausschließlich OpenAI GPT Image.
+            Lokale Reportbilder für die AI Box sowie als Rückfall, wenn OpenAI oder OpenRouter keine
+            native Bildausgabe liefern.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -449,7 +449,7 @@ export function SettingsView({
                 })
               }
             />
-            Für AI-Box-Läufe und OpenRouter-Fallback aktivieren
+            Für AI-Box-Läufe und lokalen Bild-Fallback aktivieren
           </label>
           <Field>
             <FieldLabel htmlFor="settings-comfyui-url">ComfyUI-Serveradresse</FieldLabel>

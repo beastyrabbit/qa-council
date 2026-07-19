@@ -371,8 +371,10 @@ export function ReviewComposerView({
                         <small className="text-xs text-muted-foreground">
                           {provider === "codex"
                             ? settings?.providers.codex.imageConfigured
-                              ? "OpenAI Bild-API ist konfiguriert; ComfyUI wird nicht verwendet."
-                              : "OpenAI API-Key fehlt; der Lauf bleibt möglich und protokolliert das fehlende Bild."
+                              ? "OpenAI Bild-API ist konfiguriert; bei Fehlern übernimmt das lokale ComfyUI."
+                              : settings?.comfyui.configured
+                                ? "OpenAI API-Key fehlt; das konfigurierte lokale ComfyUI erzeugt die Reportbilder."
+                                : "OpenAI API-Key fehlt und ComfyUI ist nicht vollständig konfiguriert."
                             : "Native Bildausgabe bei geeignetem Modell, andernfalls ComfyUI-Fallback."}
                         </small>
                       </span>

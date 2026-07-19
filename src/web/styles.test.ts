@@ -27,4 +27,13 @@ describe("presentation style cascade", () => {
     expect(responsiveLayers).toHaveLength(3);
     expect(fallbackScopes).toHaveLength(3);
   });
+
+  it("hält bereits gespeicherte Zeitungsartikel nach dem Laden dauerhaft sichtbar", () => {
+    expect(styles).toContain(
+      ".rendered-result--authored.rendered-result--authored .result--newspaper .news-layout",
+    );
+    expect(styles).toMatch(
+      /\.rendered-result--authored\.rendered-result--authored[\s\S]*?animation: none;/,
+    );
+  });
 });

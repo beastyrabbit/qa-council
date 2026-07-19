@@ -192,6 +192,7 @@ export function FileReader({
                   <Button
                     variant="outline"
                     size="sm"
+                    nativeButton={false}
                     className="border-[#d7d0c3] text-[#44403c] hover:bg-black/5 hover:text-[#292a26] dark:bg-transparent"
                     render={<a href={`/api/runs/${runId}/files/${content.id}?download=1`} />}
                   >

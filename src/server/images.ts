@@ -206,13 +206,33 @@ export async function getOrCreateRunImage(options: {
 
   const prompt = editorialImagePrompt(options.documentName, options.summary);
   if (options.imageProvider === "openai") {
-    return generateOpenAiImage({
-      runId: options.runId,
-      slot,
-      prompt,
-      signal: options.signal,
-      onEvent: options.onEvent,
-    });
+    try {
+      return await generateOpenAiImage({
+        runId: options.runId,
+        slot,
+        prompt,
+        signal: options.signal,
+        onEvent: options.onEvent,
+      });
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
+      options.onEvent?.({
+        type: "image_generation_fallback",
+        level: "warning",
+        message: `OpenAI-Bildausgabe nicht verfügbar; das lokale ComfyUI übernimmt: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        data: { provider: "openai", fallback: "comfyui", slot },
+      });
+      return getOrCreateEditorialImage({
+        runId: options.runId,
+        slot,
+        documentName: options.documentName,
+        summary: options.summary,
+        signal: options.signal,
+        onEvent: options.onEvent,
+      });
+    }
   }
   if (options.imageProvider === "openrouter") {
     try {
