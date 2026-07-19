@@ -31,6 +31,7 @@ import type {
   ProviderModel,
 } from "../../shared/types";
 import { api } from "../lib/api";
+import { resolveExplicitModel } from "../lib/model-selection";
 
 export function useFileDrop(onFile: (file?: File) => void, disabled = false) {
   const [dragging, setDragging] = useState(false);
@@ -175,7 +176,6 @@ export function ModelPicker({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
-  const [replacedModel, setReplacedModel] = useState("");
   const [loadRequested, setLoadRequested] = useState(!deferLoad);
   const availabilityCallback = useRef(onAvailabilityChange);
 
@@ -197,7 +197,6 @@ export function ModelPicker({
     setLoading(true);
     availabilityCallback.current?.(false);
     setLoadError("");
-    setReplacedModel("");
     api<ProviderModel[]>(`/api/providers/${provider}/models`)
       .then((items) => setModels(items))
       .catch((reason) => {
@@ -208,18 +207,12 @@ export function ModelPicker({
   }, [loadRequested, provider]);
 
   useEffect(() => {
-    if (loading || models.length === 0 || models.some((model) => model.id === value)) return;
-    if (value) setReplacedModel(value);
-    onChange(models[0].id);
-  }, [loading, models, onChange, value]);
-
-  useEffect(() => {
     availabilityCallback.current?.(
       !loading && models.some((model) => model.id === value && model.available !== false),
     );
   }, [loading, models, value]);
 
-  const selectedModel = models.find((model) => model.id === value);
+  const selectedModel = resolveExplicitModel(models, value);
 
   function modelMeta(model: ProviderModel) {
     const parts: string[] = [];
@@ -329,9 +322,9 @@ export function ModelPicker({
       {loadError && (
         <p className="text-xs text-destructive">Modelle nicht verfügbar: {loadError}</p>
       )}
-      {replacedModel && (
+      {!loading && value && models.length > 0 && !selectedModel && (
         <p className="text-xs text-amber-700 dark:text-amber-400">
-          „{replacedModel}“ ist nicht mehr verfügbar. Ein verfügbares Modell wurde ausgewählt.
+          „{value}“ ist nicht verfügbar. Bitte wähle ausdrücklich ein anderes Modell.
         </p>
       )}
     </div>

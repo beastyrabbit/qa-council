@@ -53,6 +53,13 @@ describe("Pi-Stage-Ausgabe", () => {
     expect(
       isRetryableProviderError(Object.assign(new Error("Service unavailable"), { status: 503 })),
     ).toBe(true);
+    expect(
+      isRetryableProviderError(
+        new Error(
+          "Codex error: An error occurred while processing your request. You can retry your request. Please include the request ID req-123.",
+        ),
+      ),
+    ).toBe(true);
   });
 
   it("fängt einen vorübergehenden WebSocket-Fehler in einer frischen Session ab", async () => {
