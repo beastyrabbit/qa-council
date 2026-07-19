@@ -1,6 +1,5 @@
 /* biome-ignore-all lint/security/noDangerouslySetInnerHtml: Presentation-HTML wird serverseitig per expliziter Allowlist sanitisiert. */
 import {
-  Archive,
   CircleAlert,
   FlaskConical,
   FolderOpen,
@@ -54,12 +53,7 @@ import {
 } from "./components/AppViews";
 import { FileReader } from "./components/FileReader";
 import { ConfirmDialog, type ConfirmRequest } from "./components/ViewShared";
-import {
-  ArchiveView,
-  DocumentsListView,
-  ReviewComposerView,
-  RunsListView,
-} from "./components/WorkspaceViews";
+import { DocumentsListView, ReviewComposerView, RunsListView } from "./components/WorkspaceViews";
 import { api } from "./lib/api";
 
 type MainView = "review" | "documents" | "runs" | "tests" | "archive" | "settings";
@@ -128,7 +122,6 @@ const NAV_GROUPS: {
       { view: "review", label: "Prüfen", icon: Sheet },
       { view: "documents", label: "Dokumente", icon: FolderOpen },
       { view: "runs", label: "Läufe", icon: Newspaper },
-      { view: "archive", label: "Archiv", icon: Archive },
     ],
   },
   {
@@ -687,6 +680,7 @@ export function App() {
             openDocument={openDocument}
             reviewDocument={reviewDocument}
             removeDocument={removeDocument}
+            openRunResult={openRunResult}
           />
         )}
         {view === "review" && (
@@ -696,8 +690,12 @@ export function App() {
             uploadFile={uploadFile}
             message={message}
             selectedDocument={selectedDocument}
-            navigateDocuments={() => navigateView("documents")}
+            documents={documents}
+            runs={runs}
+            selectDocument={setSelected}
             clearSelected={() => setSelected("")}
+            openRunResult={openRunResult}
+            openSettings={() => navigateView("settings")}
             provider={provider}
             setProvider={setProvider}
             setModelAvailable={setModelAvailable}
@@ -719,21 +717,14 @@ export function App() {
             startRun={startRun}
           />
         )}
-        {view === "runs" && (
+        {(view === "runs" || view === "archive") && (
           <RunsListView
             runs={runs}
-            message={message}
+            tab={view === "archive" ? "archive" : "active"}
+            onTabChange={(tab) => navigateView(tab === "archive" ? "archive" : "runs")}
             archiveAllRuns={archiveAllRuns}
             openRun={openRun}
             openRunResult={openRunResult}
-            archiveRun={archiveRun}
-            deleteStoppedRun={deleteStoppedRun}
-          />
-        )}
-        {view === "archive" && (
-          <ArchiveView
-            runs={runs}
-            openRun={openRun}
             archiveRun={archiveRun}
             deleteStoppedRun={deleteStoppedRun}
           />

@@ -127,7 +127,7 @@ let droppedDocumentId;
 try {
   await Promise.all([send("Page.enable"), send("Runtime.enable"), send("Log.enable")]);
   let page = await navigate("/");
-  for (const label of ["Prüfen", "Dokumente", "Läufe", "Testmodus", "Archiv", "Einstellungen"]) {
+  for (const label of ["Prüfen", "Dokumente", "Läufe", "Testmodus", "Einstellungen"]) {
     assert(page.text.includes(label), `Menüpunkt ${label} fehlt.`);
   }
   assert(page.text.includes("Prüfung konfigurieren"), "Prüfkonfiguration fehlt.");
@@ -234,11 +234,14 @@ try {
   checks.push("documents-menu");
 
   await evaluate(`[...document.querySelectorAll(".sidebar nav a")]
-    .find((button) => button.textContent.includes("Archiv")).click()`);
+    .find((button) => button.textContent.includes("Läufe")).click()`);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await evaluate(`[...document.querySelectorAll("[role='tab']")]
+    .find((tab) => tab.textContent.includes("Archiv")).click()`);
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert(
     (await evaluate("document.body.innerText")).includes("Abgelegte Läufe"),
-    "Archivseite fehlt.",
+    "Archiv-Tab fehlt.",
   );
   checks.push("archive-menu");
 
@@ -264,8 +267,8 @@ try {
       "document.body.innerText.includes('archiviert')",
       "Die Oberfläche bestätigte das gemeinsame Archivieren nicht.",
     );
-    await evaluate(`[...document.querySelectorAll(".sidebar nav a")]
-      .find((button) => button.textContent.includes("Archiv")).click()`);
+    await evaluate(`[...document.querySelectorAll("[role='tab']")]
+      .find((tab) => tab.textContent.includes("Archiv")).click()`);
     await waitFor(
       `document.querySelectorAll(".archive-row").length >= ${archivedForTest.length}`,
       "Die gemeinsam archivierten Läufe fehlen im Archiv.",

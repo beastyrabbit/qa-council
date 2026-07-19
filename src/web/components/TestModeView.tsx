@@ -1,6 +1,28 @@
-/* biome-ignore-all lint/security/noDangerouslySetInnerHtml: Presentation-HTML wird serverseitig per expliziter Allowlist sanitisiert. */
-import { ChevronRight, FlaskConical, LoaderCircle, Upload } from "lucide-react";
+import { ChevronRight, CircleX, FlaskConical, Upload } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 import type {
   AppSettings,
   ComparisonRecord,
@@ -11,7 +33,6 @@ import type {
 } from "../../shared/types";
 import { api } from "../lib/api";
 import { RunStatus as Status } from "./RunStatus";
-
 import {
   FORMAT_NAMES,
   formatSize,
@@ -127,177 +148,237 @@ export function TestModeView({
   ).length;
 
   return (
-    <div className="test-mode-page">
-      <header className="page-heading">
-        <h1>Anbieter vergleichen</h1>
-        <p>
+    <div className="test-mode-page mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8 lg:py-10">
+      <header>
+        <h1 className="font-heading text-3xl font-bold tracking-tight">Anbieter vergleichen</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           Ein Dokument wird mit denselben Einstellungen getrennt durch alle erreichbaren Anbieter
           geprüft. Diese Läufe erscheinen ausschließlich hier.
         </p>
       </header>
-      {message && <p className="notice notice--error">{message}</p>}
-      <section className="test-composer">
-        <label
-          className={`upload-zone ${uploading ? "upload-zone--busy" : ""} ${
-            testFileDrop.dragging ? "upload-zone--dragging" : ""
-          }`}
-          onDragEnter={testFileDrop.onDragEnter}
-          onDragOver={testFileDrop.onDragOver}
-          onDragLeave={testFileDrop.onDragLeave}
-          onDrop={testFileDrop.onDrop}
-        >
-          <input
-            type="file"
-            aria-label="Vergleichsdokument hochladen"
-            accept=".md,.txt,.pdf,.doc,.docx,.odt,.rtf,.ppt,.pptx,.odp,.xls,.xlsx,.ods,.html,.htm"
-            disabled={uploading}
-            onChange={(event) => {
-              void uploadTestFile(event.target.files?.[0]);
-              event.currentTarget.value = "";
-            }}
-          />
-          {uploading ? <LoaderCircle className="spin" size={25} /> : <Upload size={25} />}
-          <span>
-            <strong>{document?.name ?? "Vergleichsdokument hochladen"}</strong>
-            <small>
-              {document
-                ? `${formatSize(document.size)} · hochgeladen · Extraktion startet mit den Läufen`
-                : "Auswählen oder hier ablegen · Markdown, Text, PDF, DOCX oder HTML · maximal 50 MB"}
-            </small>
-          </span>
-          <span className="button button--quiet">
-            {document ? "Datei wechseln" : "Datei wählen"}
-          </span>
-        </label>
-        <div className="test-provider-list">
-          {TEST_PROVIDERS.map((provider) => {
-            const configured = settings.providers[provider].configured;
-            return (
-              <section
-                className={`test-provider ${enabled[provider] ? "test-provider--selected" : ""}`}
-                key={provider}
-              >
-                <header>
-                  <label className="test-provider__toggle">
-                    <input
-                      type="checkbox"
-                      checked={enabled[provider]}
-                      disabled={!configured}
-                      onChange={(event) =>
-                        setEnabled((current) => ({
-                          ...current,
-                          [provider]: event.target.checked,
-                        }))
+
+      {message && (
+        <Alert variant="destructive">
+          <CircleX />
+          <AlertTitle>Vergleich nicht möglich</AlertTitle>
+          <AlertDescription>{message}</AlertDescription>
+        </Alert>
+      )}
+
+      <Card>
+        <CardContent className="flex flex-col gap-5">
+          <label
+            className={cn(
+              "upload-zone flex cursor-pointer items-center gap-4 rounded-lg border-2 border-dashed bg-card p-5 transition-colors",
+              testFileDrop.dragging
+                ? "upload-zone--dragging border-primary bg-accent/60"
+                : "border-border hover:border-ring",
+              uploading && "pointer-events-none opacity-70",
+            )}
+            onDragEnter={testFileDrop.onDragEnter}
+            onDragOver={testFileDrop.onDragOver}
+            onDragLeave={testFileDrop.onDragLeave}
+            onDrop={testFileDrop.onDrop}
+          >
+            <input
+              type="file"
+              className="sr-only"
+              aria-label="Vergleichsdokument hochladen"
+              accept=".md,.txt,.pdf,.doc,.docx,.odt,.rtf,.ppt,.pptx,.odp,.xls,.xlsx,.ods,.html,.htm"
+              disabled={uploading}
+              onChange={(event) => {
+                void uploadTestFile(event.target.files?.[0]);
+                event.currentTarget.value = "";
+              }}
+            />
+            {uploading ? (
+              <Spinner className="size-6 text-muted-foreground" />
+            ) : (
+              <Upload className="size-6 text-muted-foreground" />
+            )}
+            <span className="flex min-w-0 flex-1 flex-col">
+              <strong className="truncate text-sm">
+                {document?.name ?? "Vergleichsdokument hochladen"}
+              </strong>
+              <small className="text-xs text-muted-foreground">
+                {document
+                  ? `${formatSize(document.size)} · hochgeladen · Extraktion startet mit den Läufen`
+                  : "Auswählen oder hier ablegen · Markdown, Text, PDF, DOCX oder HTML · maximal 50 MB"}
+              </small>
+            </span>
+            <span className={cn(buttonVariants({ variant: "outline" }))}>
+              {document ? "Datei wechseln" : "Datei wählen"}
+            </span>
+          </label>
+
+          <div className="grid gap-4 lg:grid-cols-3">
+            {TEST_PROVIDERS.map((provider) => {
+              const configured = settings.providers[provider].configured;
+              return (
+                <Card
+                  key={provider}
+                  className={cn(
+                    "test-provider gap-3 py-4",
+                    enabled[provider] && "border-primary/40 ring-1 ring-primary/20",
+                  )}
+                >
+                  <CardHeader className="flex flex-row items-center justify-between gap-2 px-4">
+                    <label
+                      htmlFor={`test-provider-${provider}`}
+                      className="flex cursor-pointer items-center gap-2"
+                    >
+                      <Switch
+                        id={`test-provider-${provider}`}
+                        checked={enabled[provider]}
+                        disabled={!configured}
+                        onCheckedChange={(checked) =>
+                          setEnabled((current) => ({ ...current, [provider]: checked === true }))
+                        }
+                      />
+                      <span className="text-sm font-medium">{PROVIDER_NAMES[provider]}</span>
+                    </label>
+                    {!configured ? (
+                      <Badge variant="outline">nicht konfiguriert</Badge>
+                    ) : available[provider] ? (
+                      <Badge
+                        variant="outline"
+                        className="border-primary/25 bg-primary/10 text-primary"
+                      >
+                        erreichbar
+                      </Badge>
+                    ) : enabled[provider] ? (
+                      <Badge variant="secondary">
+                        <Spinner /> wird geprüft
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary">deaktiviert</Badge>
+                    )}
+                  </CardHeader>
+                  <CardContent className="px-4">
+                    <ModelPicker
+                      provider={provider}
+                      value={models[provider]}
+                      deferLoad={!enabled[provider] || !configured}
+                      onChange={(model) =>
+                        setModels((current) => ({ ...current, [provider]: model }))
+                      }
+                      onAvailabilityChange={(value) =>
+                        setAvailable((current) =>
+                          current[provider] === value ? current : { ...current, [provider]: value },
+                        )
                       }
                     />
-                    <span>{PROVIDER_NAMES[provider]}</span>
-                  </label>
-                  <small
-                    className={configured && available[provider] ? "configured" : "not-configured"}
-                  >
-                    {!configured
-                      ? "nicht konfiguriert"
-                      : available[provider]
-                        ? "erreichbar"
-                        : "wird geprüft"}
-                  </small>
-                </header>
-                <ModelPicker
-                  provider={provider}
-                  value={models[provider]}
-                  deferLoad
-                  onChange={(model) => setModels((current) => ({ ...current, [provider]: model }))}
-                  onAvailabilityChange={(value) =>
-                    setAvailable((current) =>
-                      current[provider] === value ? current : { ...current, [provider]: value },
-                    )
-                  }
-                />
-              </section>
-            );
-          })}
-        </div>
-        <div className="test-options">
-          <label>
-            <span>Council-Modus</span>
-            <select value={mode} onChange={(event) => setMode(event.target.value as CouncilMode)}>
-              <option value="standard">Standard · 2 Council-Runden</option>
-              <option value="quick">Quick · 1 Council-Runde</option>
-              <option value="deep">Deep · 3 Council-Runden</option>
-              <option value="auto">Automatisch · Architekten-Empfehlung</option>
-            </select>
-          </label>
-          <label>
-            <span>Startansicht</span>
-            <select
-              value={presentation}
-              onChange={(event) => setPresentation(event.target.value as PresentationKind)}
-            >
-              <option value="newspaper">QA-Tageszeitung</option>
-              <option value="onepaper">Visual Report</option>
-              <option value="text">HTML / Nur Text</option>
-            </select>
-          </label>
-          <label className="test-focus">
-            <span>Optionaler gemeinsamer Fokus</span>
-            <input
-              value={focus}
-              onChange={(event) => setFocus(event.target.value)}
-              placeholder="Für alle Anbieter identisch"
-            />
-          </label>
-          <button
-            className="button button--primary"
-            type="button"
-            disabled={
-              !document || document.status === "extracting" || selectedCount === 0 || starting
-            }
-            onClick={() => void startComparison()}
-          >
-            {starting ? <LoaderCircle className="spin" size={17} /> : <FlaskConical size={17} />}
-            {selectedCount} Anbieter starten
-          </button>
-        </div>
-        <p className="test-check-note">
-          Nach dem fertigen Report prüft der Server HTML, CSS-Klassen und unerlaubtes JavaScript
-          statisch. Nur bei Befunden erhält der jeweilige Report-Agent einmalig eine Korrekturrunde.
-        </p>
-      </section>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
 
-      <section className="comparison-history">
-        <header className="section-heading">
-          <FlaskConical size={18} />
-          <h2>Vergleichsläufe</h2>
-          <span>{comparisons.length}</span>
+          <div className="grid items-end gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Field>
+              <FieldLabel htmlFor="test-mode">Council-Modus</FieldLabel>
+              <Select
+                value={mode}
+                onValueChange={(value) => value && setMode(value as CouncilMode)}
+              >
+                <SelectTrigger id="test-mode" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="standard">Standard · 2 Council-Runden</SelectItem>
+                  <SelectItem value="quick">Quick · 1 Council-Runde</SelectItem>
+                  <SelectItem value="deep">Deep · 3 Council-Runden</SelectItem>
+                  <SelectItem value="auto">Automatisch · Architekten-Empfehlung</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="test-presentation">Startansicht</FieldLabel>
+              <Select
+                value={presentation}
+                onValueChange={(value) => value && setPresentation(value as PresentationKind)}
+              >
+                <SelectTrigger id="test-presentation" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="newspaper">QA-Tageszeitung</SelectItem>
+                  <SelectItem value="onepaper">Visual Report</SelectItem>
+                  <SelectItem value="text">HTML / Nur Text</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="test-focus">Optionaler gemeinsamer Fokus</FieldLabel>
+              <Input
+                id="test-focus"
+                value={focus}
+                onChange={(event) => setFocus(event.target.value)}
+                placeholder="Für alle Anbieter identisch"
+              />
+            </Field>
+            <Button
+              disabled={
+                !document || document.status === "extracting" || selectedCount === 0 || starting
+              }
+              onClick={() => void startComparison()}
+            >
+              {starting ? <Spinner /> : <FlaskConical />}
+              {selectedCount} Anbieter starten
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Nach dem fertigen Report prüft der Server HTML, CSS-Klassen und unerlaubtes JavaScript
+            statisch. Nur bei Befunden erhält der jeweilige Report-Agent einmalig eine
+            Korrekturrunde.
+          </p>
+        </CardContent>
+      </Card>
+
+      <section className="flex flex-col gap-3">
+        <header className="flex items-center gap-2">
+          <FlaskConical className="size-4 text-muted-foreground" />
+          <h2 className="font-heading text-lg font-semibold">Vergleichsläufe</h2>
+          <Badge variant="secondary">{comparisons.length}</Badge>
         </header>
-        {comparisons.map((comparison) => (
-          <button
-            className="comparison-row"
-            type="button"
-            key={comparison.id}
-            onClick={() => onOpen(comparison.id)}
-          >
-            <div>
-              <strong>{comparison.documentName}</strong>
-              <small>
-                {shortDate(comparison.createdAt)} · {comparison.mode} ·{" "}
-                {FORMAT_NAMES[comparison.presentation]}
-              </small>
-            </div>
-            <div className="comparison-row__providers">
-              {comparison.runs.map((run) => (
-                <span key={run.id}>
-                  {PROVIDER_NAMES[run.provider]} <Status run={run} />
-                </span>
-              ))}
-            </div>
-            <ChevronRight size={18} />
-          </button>
-        ))}
-        {!comparisons.length && (
-          <div className="empty">
-            <FlaskConical size={24} />
-            <p>Noch kein Anbietervergleich.</p>
+        {comparisons.length === 0 ? (
+          <Empty className="border border-dashed">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <FlaskConical />
+              </EmptyMedia>
+              <EmptyTitle>Noch kein Anbietervergleich.</EmptyTitle>
+              <EmptyDescription>
+                Oben ein Dokument hochladen und mindestens einen Anbieter aktivieren.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <div className="flex flex-col divide-y rounded-lg border">
+            {comparisons.map((comparison) => (
+              <button
+                type="button"
+                key={comparison.id}
+                className="flex items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/50"
+                onClick={() => onOpen(comparison.id)}
+              >
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-sm font-medium">{comparison.documentName}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {shortDate(comparison.createdAt)} · {comparison.mode} ·{" "}
+                    {FORMAT_NAMES[comparison.presentation]}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {comparison.runs.map((run) => (
+                    <span key={run.id} className="flex items-center gap-1.5 text-xs">
+                      {PROVIDER_NAMES[run.provider]} <Status run={run} />
+                    </span>
+                  ))}
+                </div>
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+              </button>
+            ))}
           </div>
         )}
       </section>
