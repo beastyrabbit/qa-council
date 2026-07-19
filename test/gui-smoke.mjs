@@ -308,11 +308,17 @@ try {
     await waitFor("Boolean(document.querySelector('.run-layout'))", "Abbruch-Testlauf fehlt.");
     assert(page.text.includes("Lauf abbrechen"), "Abbruch-Aktion fehlt auf der Laufdetailseite.");
     await evaluate(`(() => {
-      window.confirm = () => true;
       [...document.querySelectorAll(".run-toolbar__actions button")]
         .find((button) => button.textContent.includes("Lauf abbrechen")).click();
       return true;
     })()`);
+    await waitFor(
+      `Boolean([...document.querySelectorAll("[data-slot='alert-dialog-action']")]
+        .find((button) => button.textContent.includes("Jetzt abbrechen")))`,
+      "Der Abbruch-Bestätigungsdialog erschien nicht.",
+    );
+    await evaluate(`[...document.querySelectorAll("[data-slot='alert-dialog-action']")]
+      .find((button) => button.textContent.includes("Jetzt abbrechen")).click()`);
     await waitFor(
       `document.body.innerText.includes("Abgebrochen")`,
       "Der Lauf wechselte nach dem Abbruch nicht in den terminalen Zustand.",
