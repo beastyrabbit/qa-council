@@ -1,4 +1,4 @@
 {
   "name": "qa-council",
-  "script": "dev"
+  "script": "dev:app"
 }
