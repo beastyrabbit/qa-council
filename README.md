@@ -33,10 +33,10 @@ Voraussetzungen sind Node.js 24+, pnpm und Portless. Die API läuft intern auf P
 
 ```bash
 pnpm install
-portless
+pnpm dev
 ```
 
-Anschließend ist die Oberfläche unter `http://qa-council.localhost:1355` erreichbar, wenn Portless auf den unprivilegierten Standardport zurückfällt. Für binäre Dokumente muss zusätzlich Tika erreichbar sein, beispielsweise mit `docker compose up tika`.
+`pnpm dev` startet API und Vite über Portless. Anschließend ist die Oberfläche unter `http://qa-council.localhost:1355` erreichbar, wenn Portless auf den unprivilegierten Standardport zurückfällt. Für binäre Dokumente muss zusätzlich Tika erreichbar sein, beispielsweise mit `docker compose up tika`.
 
 ## Konfiguration
 

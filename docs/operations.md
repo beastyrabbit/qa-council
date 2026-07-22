@@ -11,16 +11,16 @@
 
 ```bash
 pnpm install
-portless
+pnpm dev
 ```
 
-Portless startet das `dev`-Script. Die API hört lokal fest auf Port 3001, Vite übernimmt den von Portless vergebenen Anwendungsport. Die stabile Adresse lautet je nach laufender Portless-Konfiguration beispielsweise:
+Das `dev`-Script startet Portless, das wiederum API und Vite über `dev:app` ausführt. Die API hört lokal fest auf Port 3001, Vite übernimmt den von Portless vergebenen Anwendungsport. Die stabile Adresse lautet je nach laufender Portless-Konfiguration beispielsweise:
 
 ```text
 http://qa-council.localhost:1355
 ```
 
-Ohne Portless kann `pnpm dev` verwendet werden; Vite läuft dann standardmäßig auf Port 5173.
+Für eine gezielte Fehlersuche ohne Portless kann `pnpm dev:app` verwendet werden; Vite läuft dann standardmäßig auf Port 5173.
 
 Für binäre Dokumente kann Tika separat gestartet werden:
 

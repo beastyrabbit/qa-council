@@ -6,7 +6,8 @@
   "scripts": {
     "test": "vitest run",
     "test:gui": "node test/gui-smoke.mjs",
-    "dev": "concurrently -k -n api,web \"API_PORT=3001 tsx watch src/server/server.ts\" \"vite --host 0.0.0.0\"",
+    "dev": "portless",
+    "dev:app": "concurrently -k -n api,web \"API_PORT=3001 tsx watch src/server/server.ts\" \"vite --host 0.0.0.0\"",
     "build": "tsc -p tsconfig.server.json && vite build",
     "start": "node dist/server/server/server.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
