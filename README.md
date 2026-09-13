@@ -1,5 +1,10 @@
 # QA Council
 
+
+## At a glance
+
+A multi-role document review workflow that produces an auditable Markdown report.
+
 QA Council prüft hochgeladene Dokumente mit einem nachvollziehbaren Multi-Rollen-Workflow auf Basis des Pi SDK. Die acht gelieferten QA-Quelldateien liegen unverändert unter `resources/qa/source`. Der eigene Report-Designer liegt unter `resources/skills/report-designer`. Beide Quellen werden vor ihrer Verwendung gegen fest eingebaute SHA-256-Werte geprüft.
 
 ## Funktionsumfang
