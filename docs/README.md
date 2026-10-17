@@ -11,6 +11,7 @@ QA Council ist eine Webanwendung für nachvollziehbare, mehrstufige Qualitätspr
 | [Provider und Modelle](providers.md) | Codex, OpenRouter und lokale AI Box |
 | [Betrieb](operations.md) | Lokale Entwicklung, Konfiguration, Backups und Fehleranalyse |
 | [Deployment](deployment.md) | Forgejo, Container, Kubernetes, Infisical und Pangolin |
+| [UI-Regressionshinweise](ui-regression-invariants.md) | Gesperrte Report-CSS- und GUI-Smoke-Verträge |
 
 ## Kernprinzipien
 
