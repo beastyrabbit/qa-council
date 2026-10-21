@@ -1,0 +1,9 @@
+# >>> bytefleet:mcp — managed by ByteFleet, do not edit between the markers >>>
+[mcp_servers.kubernetes]
+command = "homelab-kubernetes-mcp"
+args = []
+
+[mcp_servers.talos]
+command = "homelab-talos-mcp"
+args = []
+# <<< bytefleet:mcp <<<

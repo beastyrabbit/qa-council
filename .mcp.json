@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "kubernetes": {
+      "type": "stdio",
+      "command": "homelab-kubernetes-mcp",
+      "args": []
+    },
+    "talos": {
+      "type": "stdio",
+      "command": "homelab-talos-mcp",
+      "args": []
+    }
+  }
+}
