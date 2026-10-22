@@ -137,8 +137,9 @@ lefthook run pre-commit
    `qa-council` mit der Klasse `longhorn-snapshot` anlegen und `readyToUse: true` abwarten.
 3. Das annotierte Tag `v<version>` auf den Merge-Commit pushen und das GitHub-Release
    erstellen. Der Workflow veröffentlicht `ghcr.io/beastyrabbit/qa-council:<version>`.
-4. Flux-Image-Automation committet den neuen Pin in `kub-homelab` als
-   `chore(qa-council): deploy v<version>`. Den Pin nicht von Hand ändern. Der Job
+4. Flux-Image-Automation committet `tag` und `digest` des Pins in `kub-homelab`; der
+   Commit-Text enthält `flux-system:qa-council:tag: <alt> -> <version>`. Den Pin nicht von
+   Hand ändern. Der Job
    `verify-deployment` prüft anschließend den Rollout. Optional lässt sich Flux beschleunigen:
 
 ```bash
