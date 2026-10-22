@@ -7,7 +7,7 @@
 
 ## Zielumgebung
 
-- Forgejo-Repository und Image: `git.heerlab.com/beasty/qa-council`
+- GitHub-Repository: `beastyrabbit/qa-council`, Image: `ghcr.io/beastyrabbit/qa-council`
 - Kubernetes-Namespace: `tools`
 - ClusterIP: `10.96.0.178`
 - öffentliche Adresse: `https://qa-council.skyway.tools`
@@ -21,9 +21,11 @@ cluster/homelab/apps/tools/qa-council/
 config/company-blueprints/qa-council.yaml
 ```
 
-## Forgejo Actions
+## Forgejo Actions (historisch)
 
-Der Workflow `.forgejo/workflows/ci.yaml` besitzt zwei Jobs:
+Dieser Abschnitt beschreibt die frühere Pipeline nach `git.heerlab.com/beasty/qa-council`.
+Releases laufen über GitHub Actions (siehe unten). Der Workflow `.forgejo/workflows/ci.yaml`
+besitzt zwei Jobs:
 
 ### Quality
 
@@ -129,19 +131,23 @@ lefthook run pre-commit
 
 ## Rollout
 
-1. Anwendungsrepository nach Forgejo pushen.
-2. Erfolgreichen Quality- und Container-Job abwarten.
-3. Den Git-Tag und Forgejo-Release `v<version>` erstellen und prüfen, dass
-   `git.heerlab.com/beasty/qa-council:<version>` verfügbar ist.
-4. Den unveränderlichen SemVer-Tag im HelmRelease eintragen und den GitOps-Commit pushen.
-5. Flux synchronisieren:
+1. Die Version in `package.json` per Pull Request auf `main` bringen und den erfolgreichen
+   Main-Workflow für den Merge-Commit abwarten.
+2. Einen Longhorn-VolumeSnapshot `qa-council-pre-v<version>-<zeitstempel>` der PVC
+   `qa-council` mit der Klasse `longhorn-snapshot` anlegen und `readyToUse: true` abwarten.
+3. Das annotierte Tag `v<version>` auf den Merge-Commit pushen und das GitHub-Release
+   erstellen. Der Workflow veröffentlicht `ghcr.io/beastyrabbit/qa-council:<version>`.
+4. Flux-Image-Automation committet `tag` und `digest` des Pins in `kub-homelab`; der
+   Commit-Text enthält `flux-system:qa-council:tag: <alt> -> <version>`. Den Pin nicht von
+   Hand ändern. Der Job
+   `verify-deployment` prüft anschließend den Rollout. Optional lässt sich Flux beschleunigen:
 
 ```bash
 flux reconcile source git flux-system -n flux-system
 flux reconcile kustomization git -n flux-system --with-source
 ```
 
-6. Laufzeit prüfen:
+5. Laufzeit prüfen:
 
 ```bash
 kubectl -n tools get helmrelease qa-council
@@ -151,10 +157,12 @@ kubectl -n tools logs deploy/qa-council-main --tail=100
 curl -fsS https://qa-council.skyway.tools/api/health
 ```
 
-7. Company-Pangolin-Blueprint-Workflow und SSO-Zugriff prüfen.
+6. Company-Pangolin-Blueprint-Workflow und SSO-Zugriff prüfen.
 
 ## Rollback
 
-- Anwendung: HelmRelease auf einen vorhandenen unveränderlichen SemVer- oder Commit-SHA-Tag setzen.
+- Anwendung: Fehler bevorzugt mit einem neuen Tag vorwärts beheben. Der Pin im HelmRelease trägt
+  einen `$imagepolicy`-Marker, Flux überschreibt manuelle Änderungen. Ein älteres SemVer- oder
+  `sha-*`-Image bleibt nur gesetzt, solange die Image-Automation für qa-council angehalten ist.
 - GitOps: fehlerhaften Commit mit `git revert` zurücknehmen und Flux erneut reconciliieren.
 - Daten: Longhorn-/Velero-Snapshot des PVC wiederherstellen. Datenbank und `settings.key` müssen aus demselben Sicherungsstand stammen.
