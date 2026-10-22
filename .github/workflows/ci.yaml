@@ -123,13 +123,13 @@ jobs:
             type=sha
       - name: Check release version
         if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          node -e '
+        uses: actions/github-script@v8
+        with:
+          script: |
             const { version } = JSON.parse(require("node:fs").readFileSync("package.json", "utf8"));
             if (process.env.GITHUB_REF_NAME !== `v${version}`) {
-              throw new Error(`Tag ${process.env.GITHUB_REF_NAME} does not match package.json v${version}`);
+              core.setFailed(`Tag ${process.env.GITHUB_REF_NAME} does not match package.json v${version}`);
             }
-          '
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
