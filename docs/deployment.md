@@ -43,6 +43,21 @@ Der Workflow `.forgejo/workflows/ci.yaml` besitzt zwei Jobs:
 
 Der Registry-Token wird nicht im Projekt gespeichert. Der zentrale Login bezieht ihn zur Laufzeit über die bestehende Forgejo-OIDC-/Infisical-Kette.
 
+## GitHub Actions
+
+Bei einem Push von `v*` wartet `.github/workflows/ci.yaml` bis zu 30 Minuten auf den
+erfolgreichen Abschluss des neuesten Main-Push-Workflows für denselben Commit, statt
+`quality` erneut auszuführen. Der Job `container` prüft vor jeder Tag-Veröffentlichung,
+auch bei manuellen Workflow-Starts auf einem Tag, dass der Tag exakt `v<version>` aus
+`package.json` entspricht. Main-Pushes, Pull Requests und manuelle
+Workflow-Starts führen weiterhin `quality` aus; Main veröffentlicht weiterhin seine Images.
+
+Nach der Tag-Veröffentlichung prüft `verify-deployment` bis zu 30 Minuten den Flux-Rollout
+über `http://qa-council-main.tools.svc.cluster.local:3000`: `/api/health` muss die erwartete
+Version melden und `/` das HTML der Anwendung liefern. Eine bereits neuere SemVer-Version
+gilt als überholtes Release und beendet die Prüfung erfolgreich. Authentifizierungsseiten,
+Weiterleitungen und ungültige Health-Antworten lassen sie sofort fehlschlagen.
+
 ## Kubernetes-Komponenten
 
 Der bjw-s-App-Template-HelmRelease erzeugt:

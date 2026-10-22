@@ -54,6 +54,7 @@ describe("buildApp", () => {
       services: { enqueueRun: vi.fn(() => true) },
     });
     const health = await app.inject({ method: "GET", url: "/api/health" });
+    expect(health.headers["cache-control"]).toBe("no-store");
     expect(health.json()).toEqual({
       ok: true,
       version: JSON.parse(readFileSync("package.json", "utf8")).version,

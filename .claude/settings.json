@@ -1,6 +1,3 @@
 {
-  "enabledMcpjsonServers": [
-    "kubernetes",
-    "talos"
-  ]
+  "enabledMcpjsonServers": ["kubernetes", "talos"]
 }
