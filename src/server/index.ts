@@ -158,11 +158,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     };
   }
 
-  app.get("/api/health", async () => ({
-    ok: true,
-    version: APP_VERSION,
-    schemaVersion: SCHEMA_VERSION,
-  }));
+  app.get("/api/health", async (_request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    return { ok: true, version: APP_VERSION, schemaVersion: SCHEMA_VERSION };
+  });
 
   app.get("/api/documents", async () => {
     const rows = sqlite

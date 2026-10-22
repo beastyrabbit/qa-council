@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   quality:
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/v')
     runs-on: arc-qa-council
     steps:
       - name: Checkout repository
@@ -44,8 +45,54 @@ jobs:
       - name: Run quality checks
         run: pnpm check
 
+  main-ci:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: arc-qa-council
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Wait for main CI
+        uses: actions/github-script@v8
+        with:
+          retries: 3
+          script: |
+            const deadline = Date.now() + 30 * 60 * 1000;
+            let lastState = "No matching main push run found";
+            while (Date.now() < deadline) {
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                ...context.repo,
+                workflow_id: "ci.yaml",
+                event: "push",
+                branch: "main",
+                head_sha: context.sha,
+                per_page: 100,
+                request: { timeout: 10_000 },
+              });
+              const run = data.workflow_runs
+                .filter(run => run.event === "push" && run.head_branch === "main" && run.head_sha === context.sha)
+                .sort((a, b) => b.id - a.id)[0];
+              if (run) {
+                lastState = `Main CI ${run.html_url}: ${run.status}/${run.conclusion}`;
+                if (run.status === "completed") {
+                  if (run.conclusion !== "success") throw new Error(lastState);
+                  core.info(lastState);
+                  return;
+                }
+                if (run.conclusion && run.conclusion !== "success") throw new Error(lastState);
+              }
+              core.info(lastState);
+              await new Promise(resolve => setTimeout(resolve, Math.min(20_000, deadline - Date.now())));
+            }
+            throw new Error(`Timed out waiting for main CI: ${lastState}`);
+
   container:
-    needs: quality
+    needs: [quality, main-ci]
+    if: >-
+      ${{ !cancelled() &&
+        ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.main-ci.result == 'success') ||
+        ((github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/v')) && needs.quality.result == 'success')) }}
     runs-on: arc-qa-council
     permissions:
       contents: read
@@ -75,6 +122,15 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
+      - name: Check release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { version } = JSON.parse(require("node:fs").readFileSync("package.json", "utf8"));
+            if (process.env.GITHUB_REF_NAME !== `v${version}`) {
+              core.setFailed(`Tag ${process.env.GITHUB_REF_NAME} does not match package.json v${version}`);
+            }
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
@@ -83,3 +139,24 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  verify-deployment:
+    needs: container
+    if: >-
+      ${{ !cancelled() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') &&
+        needs.container.result == 'success' && !contains(github.ref_name, '-') }}
+    runs-on: arc-qa-council
+    timeout-minutes: 35
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Set up Node 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Wait for Flux rollout
+        env:
+          DEPLOYMENT_URL: http://qa-council-main.tools.svc.cluster.local:3000
+          DEPLOYMENT_TIMEOUT_MS: "1800000"
+          DEPLOYMENT_POLL_INTERVAL_MS: "20000"
+        run: EXPECTED_VERSION="${GITHUB_REF_NAME#v}" node scripts/verify-deployment.mjs
