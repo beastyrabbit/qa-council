@@ -68,4 +68,4 @@ Report-Manifeste.
 
 ## Deployment
 
-Das Container-Image wird von Forgejo Actions über den gemeinsamen BuildKit- und Registry-Login-Workflow als `git.heerlab.com/beasty/qa-council` veröffentlicht. Die GitOps-Manifeste liegen im separaten `kub-homelab`-Repository unter `cluster/homelab/apps/tools/qa-council`.
+GitHub Actions veröffentlicht das Container-Image als `ghcr.io/beastyrabbit/qa-council`. Ein Tag `v<version>` passend zu `package.json` ist das Deployment: Flux-Image-Automation im separaten `kub-homelab`-Repository rollt die neue SemVer-Version aus, und der Workflow prüft anschließend, dass sie im Cluster läuft. Die GitOps-Manifeste liegen dort unter `cluster/homelab/apps/tools/qa-council`.
