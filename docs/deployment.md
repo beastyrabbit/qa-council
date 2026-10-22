@@ -57,6 +57,7 @@ Nach der Tag-Veröffentlichung prüft `verify-deployment` bis zu 30 Minuten den 
 Version melden und `/` das HTML der Anwendung liefern. Eine bereits neuere SemVer-Version
 gilt als überholtes Release und beendet die Prüfung erfolgreich. Authentifizierungsseiten,
 Weiterleitungen und ungültige Health-Antworten lassen sie sofort fehlschlagen.
+Prerelease-Tags werden veröffentlicht, aber von Flux nicht ausgerollt und daher nicht verifiziert.
 
 ## Kubernetes-Komponenten
 
