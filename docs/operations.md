@@ -28,6 +28,8 @@ Für binäre Dokumente kann Tika separat gestartet werden:
 docker compose up tika
 ```
 
+Compose veröffentlicht Tika nur lokal unter `http://127.0.0.1:9998`, passend zum Standardwert von `TIKA_URL`.
+
 Oder die gesamte lokale Containerumgebung:
 
 ```bash
