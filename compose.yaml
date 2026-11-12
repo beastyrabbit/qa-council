@@ -21,6 +21,8 @@ services:
   tika:
     image: apache/tika:3.3.1.0-full
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:9998:9998"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9998/version"]
       interval: 20s

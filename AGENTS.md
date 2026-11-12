@@ -1,5 +1,7 @@
 # QA Council Project Guidelines
 
+Project knowledge lives in memex: project page `pages/projects/qa-council.md`.
+
 ## Testing and Live AI
 - Keep `pnpm check`, Vitest, CI, and GUI smoke tests offline and deterministic; they must not require provider credentials or start an AI analysis.
 - Never call a live AI provider from an automated test. Every token costs money, so automated test runs must not waste or incur token costs.
