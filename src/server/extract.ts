@@ -304,7 +304,7 @@ ${normalizeText(pageText) || "[kein Text]"}`,
   return result.content;
 }
 
-async function extractNativeWordStructure(
+export async function extractNativeWordStructure(
   filename: string,
   mimeType: string,
   buffer: Buffer,
@@ -316,10 +316,10 @@ async function extractNativeWordStructure(
   });
   const tikaUrl = process.env.TIKA_URL ?? "http://127.0.0.1:9998";
   const timeoutSignal = AbortSignal.timeout(120_000);
-  const response = await fetch(`${tikaUrl}/tika`, {
+  // Tika 4 answers `PUT /tika` with `Accept: text/html` with 406; `/tika/html` works on 3.x and 4.x.
+  const response = await fetch(`${tikaUrl}/tika/html`, {
     method: "PUT",
     headers: {
-      Accept: "text/html",
       "Content-Type": mimeType || "application/octet-stream",
     },
     body: new Uint8Array(buffer),
