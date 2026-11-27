@@ -109,6 +109,21 @@ describe("verifyDeployment", () => {
     await expect(verify(fetch)).resolves.toBe("deployed");
   });
 
+  it("retries a 5xx whose body already errored", async () => {
+    const errored = new ReadableStream({
+      start(controller) {
+        controller.error(new Error("upstream reset"));
+      },
+    });
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(errored, { status: 503 }))
+      .mockResolvedValueOnce(health())
+      .mockResolvedValueOnce(html());
+    await expect(verify(fetch)).resolves.toBe("deployed");
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
   it("retries request timeouts", async () => {
     const fetch = vi
       .fn()
