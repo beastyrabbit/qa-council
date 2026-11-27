@@ -72,7 +72,8 @@ export async function verifyDeployment({
       throw new RetryableError(`${path}: ${error.message}`);
     }
     if (response.status >= 500 && response.status <= 599) {
-      await response.body?.cancel();
+      // Best effort: a body that already errored must not turn this retryable 5xx into a fatal error.
+      await response.body?.cancel().catch(() => {});
       throw new RetryableError(`${path}: HTTP ${response.status}`);
     }
     if (response.status !== 200) {
